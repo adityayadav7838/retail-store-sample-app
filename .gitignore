@@ -36,6 +36,7 @@ devenv.local.nix
 /terraform/eks/default/.terraform.lock.hcl
 /terraform/eks/default/.terraform.tfstate
 /terraform/eks/default/.terraform.tfstate.backup
+<<<<<<< HEAD
 # Terraform temporary & state files
 .terraform/
 *.tfstate
@@ -49,3 +50,5 @@ devenv.local.nix
 .idea/
 .vscode/
 *.log
+=======
+>>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61

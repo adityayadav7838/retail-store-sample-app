@@ -240,4 +240,8 @@ jobs:
             fi
           else
             echo "ℹ️ **Status:** No services changed - no deployment needed" >> $GITHUB_STEP_SUMMARY
+<<<<<<< HEAD
           fi
+=======
+          fi
+>>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
