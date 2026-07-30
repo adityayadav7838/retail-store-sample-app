@@ -230,9 +230,9 @@ jobs:
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "**Actions completed:**" >> $GITHUB_STEP_SUMMARY
               echo "- 🔨 Built and pushed Docker images to ECR" >> $GITHUB_STEP_SUMMARY
-              echo "- 📝 Updated Helm chart values" >> $GITHUB_STEP_SUMMARY
-              echo "- 💾 Committed changes to repository" >> $GITHUB_STEP_SUMMARY
-              echo "- 🔄 ArgoCD will sync automatically" >> $GITHUB_STEP_SUMMARY
+              echo "- � BUpdated Helm chart values" >> $GITHUB_STEP_SUMMARY
+              echo "- �  Committed changes to repository" >> $GITHUB_STEP_SUMMARY
+              echo "- � CArgoCD will sync automatically" >> $GITHUB_STEP_SUMMARY
             else
               echo "❌ **Status:** Deployment failed" >> $GITHUB_STEP_SUMMARY
               echo "Check the workflow logs for details" >> $GITHUB_STEP_SUMMARY
