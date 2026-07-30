@@ -1,15 +1,10 @@
-# =============================================================================
 # INPUT VARIABLES
-# =============================================================================
 
 variable "aws_region" {
   description = "AWS region where resources will be created"
   type        = string
-<<<<<<< HEAD
   default     = "ap-south-1"
-=======
   default     = "us-west-2"
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
 }
 
 variable "cluster_name" {
@@ -27,11 +22,8 @@ variable "environment" {
 variable "kubernetes_version" {
   description = "Kubernetes version for EKS cluster"
   type        = string
-<<<<<<< HEAD
   default     = "1.36"
-=======
   default     = "1.33"
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
 }
 
 variable "vpc_cidr" {

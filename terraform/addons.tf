@@ -1,8 +1,4 @@
-# =============================================================================
 # EKS ADD-ONS AND EXTENSIONS
-# =============================================================================
-
-<<<<<<< HEAD
 # Stage 1: AWS Load Balancer Controller only
 # Must be fully ready before other addons deploy, because LBC installs a
 # MutatingWebhookConfiguration that intercepts Service creation cluster-wide.
@@ -46,55 +42,28 @@ module "eks_addons" {
   source  = "aws-ia/eks-blueprints-addons/aws"
   version = "~> 1.16"
 
-=======
-module "eks_addons" {
-  source  = "aws-ia/eks-blueprints-addons/aws"
-  version = "~> 1.0"
-
-  # Cluster information
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
   cluster_name      = module.retail_app_eks.cluster_name
   cluster_endpoint  = module.retail_app_eks.cluster_endpoint
   cluster_version   = module.retail_app_eks.cluster_version
   oidc_provider_arn = module.retail_app_eks.oidc_provider_arn
 
-  # =============================================================================
-<<<<<<< HEAD
   # CERT-MANAGER
-=======
-  # CERT-MANAGER - SSL Certificate Management
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
-  # =============================================================================
   enable_cert_manager = true
   cert_manager = {
     most_recent = true
     namespace   = "cert-manager"
-<<<<<<< HEAD
     wait        = true
     timeout     = 300
   }
 
-  # =============================================================================
   # NGINX INGRESS CONTROLLER
-=======
-  }
-
-  # =============================================================================
-  # NGINX INGRESS CONTROLLER - Load Balancing and Routing
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
-  # =============================================================================
   enable_ingress_nginx = true
   ingress_nginx = {
     most_recent = true
     namespace   = "ingress-nginx"
-<<<<<<< HEAD
     wait        = true
     timeout     = 600
 
-=======
-    
-    # Basic configuration
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
     set = [
       {
         name  = "controller.service.type"
@@ -119,32 +88,16 @@ module "eks_addons" {
       {
         name  = "controller.resources.limits.memory"
         value = "256Mi"
-<<<<<<< HEAD
       },
       {
         name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
         value = "external"
-=======
-      }
-    ]
-    
-    # AWS Load Balancer specific annotations
-    set_sensitive = [
-      {
-        name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
-        value = "internet-facing"
-      },
-      {
-        name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-type"
-        value = "nlb"
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
       },
       {
         name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-nlb-target-type"
         value = "instance"
       },
       {
-<<<<<<< HEAD
         name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-scheme"
         value = "internet-facing"
       },
@@ -158,26 +111,12 @@ module "eks_addons" {
       },
       {
         name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-healthcheck-protocol"
-=======
-        name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-health-check-path"
-        value = "/healthz"
-      },
-      {
-        name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-health-check-port"
-        value = "10254"
-      },
-      {
-        name  = "controller.service.annotations.service\\.beta\\.kubernetes\\.io/aws-load-balancer-health-check-protocol"
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
         value = "HTTP"
       }
     ]
   }
 
-  # =============================================================================
-<<<<<<< HEAD
   # MONITORING STACK (PROMETHEUS + GRAFANA)
-  # =============================================================================
   enable_kube_prometheus_stack = true
   kube_prometheus_stack = {
     namespace        = "monitoring"
@@ -200,26 +139,3 @@ module "eks_addons" {
   # Wait for LBC to be fully ready before deploying anything that creates Services
   depends_on = [module.eks_addons_lbc]
 }
-=======
-  # OPTIONAL: MONITORING STACK
-  # =============================================================================
-  # Uncomment below to enable monitoring (increases costs)
-  
-  # enable_kube_prometheus_stack = var.enable_monitoring
-  # kube_prometheus_stack = {
-  #   most_recent = true
-  #   namespace   = "monitoring"
-  # }
-
-  # =============================================================================
-  # OPTIONAL: AWS LOAD BALANCER CONTROLLER
-  # =============================================================================
-  # enable_aws_load_balancer_controller = true
-  # aws_load_balancer_controller = {
-  #   most_recent = true
-  #   namespace   = "kube-system"
-  # }
-
-  depends_on = [module.retail_app_eks]
-}
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61

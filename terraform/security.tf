@@ -1,6 +1,4 @@
-# =============================================================================
 # SECURITY GROUPS AND RULES
-# =============================================================================
 
 # Allow HTTP/HTTPS traffic from internet to load balancer
 resource "aws_security_group_rule" "internet_to_lb_http" {

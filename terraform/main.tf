@@ -1,10 +1,6 @@
-# =============================================================================
 # MAIN INFRASTRUCTURE RESOURCES
-# =============================================================================
 
-# =============================================================================
 # VPC CONFIGURATION
-# =============================================================================
 
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -43,9 +39,7 @@ module "vpc" {
   tags = local.common_tags
 }
 
-# =============================================================================
 # EKS CLUSTER CONFIGURATION
-# =============================================================================
 
 module "retail_app_eks" {
   source  = "terraform-aws-modules/eks/aws"
@@ -55,12 +49,9 @@ module "retail_app_eks" {
   cluster_name    = local.cluster_name
   cluster_version = var.kubernetes_version
 
-<<<<<<< HEAD
   # Enable IAM Roles for Service Accounts (IRSA / OIDC Provider)
   enable_irsa = true
 
-=======
->>>>>>> c0f37e18f096d97fa4e901b628548f32e78cde61
   # Cluster access configuration
   cluster_endpoint_public_access           = true
   cluster_endpoint_private_access          = true
