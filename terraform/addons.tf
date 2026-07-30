@@ -1,4 +1,6 @@
+# =============================================================================
 # EKS ADD-ONS AND EXTENSIONS
+# =============================================================================
 # Stage 1: AWS Load Balancer Controller only
 # Must be fully ready before other addons deploy, because LBC installs a
 # MutatingWebhookConfiguration that intercepts Service creation cluster-wide.
@@ -47,7 +49,9 @@ module "eks_addons" {
   cluster_version   = module.retail_app_eks.cluster_version
   oidc_provider_arn = module.retail_app_eks.oidc_provider_arn
 
+  # =============================================================================
   # CERT-MANAGER
+  # =============================================================================
   enable_cert_manager = true
   cert_manager = {
     most_recent = true
@@ -56,7 +60,9 @@ module "eks_addons" {
     timeout     = 300
   }
 
+  # =============================================================================
   # NGINX INGRESS CONTROLLER
+  # =============================================================================
   enable_ingress_nginx = true
   ingress_nginx = {
     most_recent = true
@@ -116,7 +122,9 @@ module "eks_addons" {
     ]
   }
 
+  # =============================================================================
   # MONITORING STACK (PROMETHEUS + GRAFANA)
+  # =============================================================================
   enable_kube_prometheus_stack = true
   kube_prometheus_stack = {
     namespace        = "monitoring"

@@ -1,6 +1,10 @@
+# =============================================================================
 # OUTPUT VALUES
+# =============================================================================
 
+# =============================================================================
 # CLUSTER INFORMATION
+# =============================================================================
 
 output "cluster_name" {
   description = "Name of the EKS cluster (with unique suffix)"
@@ -37,7 +41,9 @@ output "cluster_oidc_issuer_url" {
   value       = module.retail_app_eks.cluster_oidc_issuer_url
 }
 
+# =============================================================================
 # NETWORK INFORMATION
+# =============================================================================
 
 output "vpc_id" {
   description = "ID of the VPC where the cluster is deployed"
@@ -59,7 +65,9 @@ output "public_subnets" {
   value       = module.vpc.public_subnets
 }
 
+# =============================================================================
 # ACCESS INFORMATION
+# =============================================================================
 
 output "configure_kubectl" {
   description = "Configure kubectl: make sure you're logged in with the correct AWS profile and run the following command to update your kubeconfig"
@@ -82,7 +90,9 @@ output "argocd_admin_password" {
   sensitive   = true
 }
 
+# =============================================================================
 # APPLICATION ACCESS
+# =============================================================================
 
 output "ingress_nginx_loadbalancer" {
   description = "Command to get the LoadBalancer URL for accessing applications"
@@ -94,7 +104,9 @@ output "retail_store_url" {
   value       = "echo 'http://'$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')"
 }
 
+# =============================================================================
 # USEFUL COMMANDS
+# =============================================================================
 
 output "useful_commands" {
   description = "Useful commands for managing the cluster"
@@ -105,5 +117,7 @@ output "useful_commands" {
     argocd_apps         = "kubectl get applications -n ${var.argocd_namespace}"
     ingress_status      = "kubectl get ingress -A"
     describe_cluster    = "kubectl cluster-info"
+
+    
   }
 }
