@@ -16,8 +16,7 @@ terraform-organized/
 ├── argocd.tf                  # ArgoCD installation
 └── README.md                  # This file
 ```
-I m doing some changes
-basjkbasjbdjkasbfkdjkadhgfhjdsbghdvshcvdskhvdkjbj
+
 ## 🚀 Quick Start
 
 ### 1. Prerequisites
