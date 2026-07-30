@@ -225,7 +225,6 @@ jobs:
           if [ "${{ needs.detect-changes.outputs.has-changes }}" == "true" ]; then
             echo "**Changed Services:** ${{ needs.detect-changes.outputs.changed-services }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            
             if [ "${{ needs.deploy.result }}" == "success" ]; then
               echo "✅ **Status:** Deployment successful" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
@@ -240,5 +239,4 @@ jobs:
             fi
           else
             echo "ℹ️ **Status:** No services changed - no deployment needed" >> $GITHUB_STEP_SUMMARY
-          
-          
+          fi
