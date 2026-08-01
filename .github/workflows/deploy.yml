@@ -215,18 +215,17 @@ jobs:
     steps:
       - name: Create deployment summary
         run: |
-          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
           echo "**Branch:** main" >> $GITHUB_STEP_SUMMARY
           echo "**Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
           if [ "${{ needs.detect-changes.outputs.has-changes }}" == "true" ]; then
             echo "**Changed Services:** ${{ needs.detect-changes.outputs.changed-services }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             if [ "${{ needs.deploy.result }}" == "success" ]; then
-              echo "✅ **Status:** Deployment successful" >> $GITHUB_STEP_SUMMARY
+              echo "**Status:** Deployment successful" >> $GITHUB_STEP_SUMMARY
               echo "" >> $GITHUB_STEP_SUMMARY
               echo "**Actions completed:**" >> $GITHUB_STEP_SUMMARY
               echo "- Built and pushed Docker images to ECR" >> $GITHUB_STEP_SUMMARY
@@ -234,9 +233,9 @@ jobs:
               echo "- Committed changes to repository" >> $GITHUB_STEP_SUMMARY
               echo "- ArgoCD will sync automatically" >> $GITHUB_STEP_SUMMARY
             else
-              echo "❌ **Status:** Deployment failed" >> $GITHUB_STEP_SUMMARY
+              echo "**Status:** Deployment failed" >> $GITHUB_STEP_SUMMARY
               echo "Check the workflow logs for details" >> $GITHUB_STEP_SUMMARY
             fi
           else
-            echo "ℹ️ **Status:** No services changed - no deployment needed" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** No services changed - no deployment needed" >> $GITHUB_STEP_SUMMARY
           fi
