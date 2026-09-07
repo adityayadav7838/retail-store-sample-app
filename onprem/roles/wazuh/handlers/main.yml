@@ -1,0 +1,13 @@
+---
+- name: Restart wazuh-agent
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    state: restarted
+  become: true
+
+- name: Restart k3s
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"

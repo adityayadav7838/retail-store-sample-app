@@ -1,0 +1,78 @@
+# =============================================================================
+# Kubernetes API Server Audit Policy
+# Captures events at appropriate verbosity levels for Wazuh SIEM ingestion.
+# Requirements: 8.6
+# =============================================================================
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  # Do not log requests to certain non-resource endpoints
+  - level: None
+    nonResourceURLs:
+      - /healthz
+      - /livez
+      - /readyz
+      - /metrics
+
+  # Do not log watch requests from node or proxy subresources
+  - level: None
+    users:
+      - system:kube-proxy
+    verbs:
+      - watch
+    resources:
+      - group: ""
+        resources:
+          - endpoints
+          - services
+          - services/status
+
+  # Do not log authenticated requests to certain core API groups from kubelet
+  - level: None
+    users:
+      - kubelet
+    verbs:
+      - get
+    resources:
+      - group: ""
+        resources:
+          - nodes
+          - nodes/status
+
+  # Log secrets and configmaps at Request level (captures object content)
+  - level: Request
+    resources:
+      - group: ""
+        resources:
+          - secrets
+          - configmaps
+    omitStages:
+      - RequestReceived
+
+  # Log pod exec and port-forward at RequestResponse (full request + response)
+  - level: RequestResponse
+    resources:
+      - group: ""
+        resources:
+          - pods/exec
+          - pods/portforward
+          - pods/attach
+    omitStages:
+      - RequestReceived
+
+  # Log RBAC changes at RequestResponse level (privilege escalation detection)
+  - level: RequestResponse
+    resources:
+      - group: rbac.authorization.k8s.io
+        resources:
+          - roles
+          - rolebindings
+          - clusterroles
+          - clusterrolebindings
+    omitStages:
+      - RequestReceived
+
+  # Log all other API requests at Metadata level
+  - level: Metadata
+    omitStages:
+      - RequestReceived

@@ -1,0 +1,48 @@
+# =============================================================================
+# containerd config.toml — managed by Ansible (local-registry role)
+# Adds the on-premises Docker Registry as an insecure mirror so that
+# containerd on every Kubernetes node can pull images without TLS.
+# Requirements: 2.5
+#
+# This file is generated from the node's own `containerd config default`
+# output (written first by the local-registry role) and then this template
+# appends / patches the [plugins."io.containerd.grpc.v1.cri".registry]
+# section.  The full default config is preserved; only the registry mirrors
+# block is injected.
+# =============================================================================
+
+# ---- BEGIN: output of `containerd config default` with registry patch -------
+#
+# Because Ansible already wrote the containerd default config to disk before
+# templating, this template file provides a self-contained, idiomatic
+# config.toml that explicitly sets the insecure registry mirror.  Operators
+# can extend the sections below as needed.
+
+version = 2
+
+[plugins]
+
+  [plugins."io.containerd.grpc.v1.cri"]
+
+    [plugins."io.containerd.grpc.v1.cri".registry]
+
+      # -----------------------------------------------------------------------
+      # Mirror configuration — route pulls for the local registry through
+      # the insecure HTTP endpoint.
+      # registry_ip and registry_port are set in group_vars/all.yml.
+      # -----------------------------------------------------------------------
+      [plugins."io.containerd.grpc.v1.cri".registry.mirrors]
+
+        [plugins."io.containerd.grpc.v1.cri".registry.mirrors."{{ registry_ip }}:{{ registry_port }}"]
+          endpoint = ["http://{{ registry_ip }}:{{ registry_port }}"]
+
+      # -----------------------------------------------------------------------
+      # Mark the local registry as insecure (no TLS verification required).
+      # Requirement 2.5: WHERE TLS is not configured for the Local Registry,
+      # THE Docker Daemon on each node SHALL treat the registry as insecure.
+      # -----------------------------------------------------------------------
+      [plugins."io.containerd.grpc.v1.cri".registry.configs]
+
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."{{ registry_ip }}:{{ registry_port }}".tls]
+          insecure_skip_verify = true
+

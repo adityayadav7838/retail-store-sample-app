@@ -1,0 +1,102 @@
+---
+# =============================================================================
+# build-push-images/tasks/main.yml
+# Builds each Retail Store service Docker image from its local Dockerfile,
+# tags it with the short Git SHA, and pushes it to the local registry.
+# The resolved git_sha fact is stored for use by the helm-values role.
+# Requirements: 2.2, 2.3, 3.1
+# =============================================================================
+
+# Run on the Ansible control node — it has access to the repo and Docker CLI.
+# delegate_to: localhost + run_once: true on every task.
+
+# ---------------------------------------------------------------------------
+# 1. Resolve git SHA and store as a fact (requirement 3.1 — image tag)
+# ---------------------------------------------------------------------------
+- name: Get short Git SHA for image tagging
+  ansible.builtin.command: git rev-parse --short HEAD
+  args:
+    chdir: "{{ playbook_dir | dirname }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  register: _git_sha_result
+
+- name: Set git_sha fact
+  ansible.builtin.set_fact:
+    git_sha: "{{ _git_sha_result.stdout | trim }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Display resolved image tag
+  ansible.builtin.debug:
+    msg: "Building and pushing images with tag: {{ git_sha }}"
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 2. Build and push each service image (requirements 2.2, 2.3)
+#    Services: ui, catalog, cart, orders, checkout
+# ---------------------------------------------------------------------------
+- name: Build service Docker images
+  ansible.builtin.command: >
+    docker build
+    -t {{ registry_ip }}:{{ registry_port }}/retail-store-{{ item }}:{{ git_sha }}
+    src/{{ item }}
+  args:
+    chdir: "{{ playbook_dir | dirname }}"
+  loop:
+    - ui
+    - catalog
+    - cart
+    - orders
+    - checkout
+  delegate_to: localhost
+  run_once: true
+  register: _docker_build_results
+  retries: 2
+  delay: 5
+  until: _docker_build_results is not failed
+
+- name: Push service images to local registry
+  ansible.builtin.command: >
+    docker push {{ registry_ip }}:{{ registry_port }}/retail-store-{{ item }}:{{ git_sha }}
+  loop:
+    - ui
+    - catalog
+    - cart
+    - orders
+    - checkout
+  delegate_to: localhost
+  run_once: true
+  register: _docker_push_results
+  retries: 3
+  delay: 10
+  until: _docker_push_results is not failed
+
+# ---------------------------------------------------------------------------
+# 3. Confirm all images are available in the registry
+# ---------------------------------------------------------------------------
+- name: Verify images are present in local registry
+  ansible.builtin.uri:
+    url: "http://{{ registry_ip }}:{{ registry_port }}/v2/retail-store-{{ item }}/tags/list"
+    method: GET
+    status_code: 200
+  loop:
+    - ui
+    - catalog
+    - cart
+    - orders
+    - checkout
+  delegate_to: localhost
+  run_once: true
+  register: _registry_verify
+  retries: 3
+  delay: 5
+  until: _registry_verify is not failed
+
+- name: Confirm images pushed successfully
+  ansible.builtin.debug:
+    msg: >
+      All 5 service images pushed to
+      {{ registry_ip }}:{{ registry_port }} with tag {{ git_sha }}
+  run_once: true

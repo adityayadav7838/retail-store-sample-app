@@ -1,0 +1,11 @@
+---
+# Entry-point playbook for the helm-values role.
+# Imported by onprem/site.yml after the build-push-images role.
+#
+# Runs on the Ansible control node (localhost) since it writes files
+# into the local repository working directory.
+- name: Generate on-premises Helm value overrides
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: helm-values

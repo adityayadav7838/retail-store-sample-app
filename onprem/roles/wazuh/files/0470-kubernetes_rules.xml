@@ -1,0 +1,107 @@
+<!-- =========================================================
+     Wazuh rules for Kubernetes API audit log events
+     Requirements: 8.6, 8.7
+     ========================================================= -->
+<group name="kubernetes,">
+
+  <!-- Base rule: any Kubernetes audit log event -->
+  <rule id="87901" level="3">
+    <decoded_as>json</decoded_as>
+    <field name="apiVersion">audit.k8s.io</field>
+    <description>Kubernetes API audit log event</description>
+    <options>no_full_log</options>
+  </rule>
+
+  <!-- Anonymous / unauthenticated requests -->
+  <rule id="87902" level="10">
+    <if_sid>87901</if_sid>
+    <field name="user.username">system:anonymous</field>
+    <description>Kubernetes: anonymous request to the API server</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Secrets accessed -->
+  <rule id="87903" level="7">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.resource">secrets</field>
+    <field name="verb">get|list|watch</field>
+    <description>Kubernetes: Secret accessed - $(user.username)</description>
+    <mitre>
+      <id>T1552.007</id>
+    </mitre>
+  </rule>
+
+  <!-- Secrets created or modified -->
+  <rule id="87904" level="9">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.resource">secrets</field>
+    <field name="verb">create|update|patch|delete</field>
+    <description>Kubernetes: Secret modified - $(user.username)</description>
+    <mitre>
+      <id>T1552.007</id>
+    </mitre>
+  </rule>
+
+  <!-- Pod exec -->
+  <rule id="87905" level="10">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.subresource">exec</field>
+    <description>Kubernetes: exec into a pod - $(user.username) in $(objectRef.namespace)/$(objectRef.name)</description>
+    <mitre>
+      <id>T1609</id>
+    </mitre>
+  </rule>
+
+  <!-- Port-forward -->
+  <rule id="87906" level="8">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.subresource">portforward</field>
+    <description>Kubernetes: port-forward opened - $(user.username) to $(objectRef.namespace)/$(objectRef.name)</description>
+    <mitre>
+      <id>T1572</id>
+    </mitre>
+  </rule>
+
+  <!-- RBAC ClusterRoleBinding created (privilege escalation) -->
+  <rule id="87907" level="12">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.resource">clusterrolebindings</field>
+    <field name="verb">create|update|patch</field>
+    <description>Kubernetes: ClusterRoleBinding created or modified - possible privilege escalation by $(user.username)</description>
+    <mitre>
+      <id>T1078.001</id>
+    </mitre>
+  </rule>
+
+  <!-- ServiceAccount token creation -->
+  <rule id="87908" level="7">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.resource">serviceaccounts</field>
+    <field name="objectRef.subresource">token</field>
+    <description>Kubernetes: ServiceAccount token requested by $(user.username)</description>
+    <mitre>
+      <id>T1528</id>
+    </mitre>
+  </rule>
+
+  <!-- Forbidden / 403 responses -->
+  <rule id="87909" level="8">
+    <if_sid>87901</if_sid>
+    <field name="responseStatus.code">403</field>
+    <description>Kubernetes: API request forbidden (403) for $(user.username)</description>
+    <mitre>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Deployment/DaemonSet modification -->
+  <rule id="87910" level="6">
+    <if_sid>87901</if_sid>
+    <field name="objectRef.resource">deployments|daemonsets|statefulsets</field>
+    <field name="verb">create|update|patch|delete</field>
+    <description>Kubernetes: Workload modified - $(objectRef.resource) by $(user.username)</description>
+  </rule>
+
+</group>

@@ -1,0 +1,8 @@
+---
+# Entry-point playbook for the preflight role.
+# Imported by onprem/site.yml as the first step.
+- name: Pre-flight checks
+  hosts: all
+  gather_facts: false   # facts are gathered selectively inside the role tasks
+  roles:
+    - role: preflight

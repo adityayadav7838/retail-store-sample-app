@@ -1,0 +1,113 @@
+---
+# =============================================================================
+# preflight/tasks/main.yml
+# Pre-flight checks — runs on the Ansible control node and all target hosts.
+# Aborts the entire playbook if any check fails, before touching the cluster.
+# Requirements: 6.3
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Control-node tool checks
+#    Run locally (delegate_to: localhost) so we verify the machine that is
+#    driving Ansible has the required binaries before any remote work begins.
+# ---------------------------------------------------------------------------
+- name: Check that required tools are installed on the control node
+  ansible.builtin.command: "which {{ item }}"
+  delegate_to: localhost
+  run_once: true
+  changed_when: false
+  register: _tool_check
+  loop:
+    - ansible
+    - kubectl
+    - helm
+    - docker
+  ignore_errors: true   # collect all results; assert once below
+
+- name: Assert all required control-node tools are present
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+    fail_msg: >
+      Required tool '{{ item.item }}' was not found on the Ansible control node.
+      Install it and re-run the playbook.
+    success_msg: "Control-node tool '{{ item.item }}' found at {{ item.stdout }}"
+  loop: "{{ _tool_check.results }}"
+  delegate_to: localhost
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 2. SSH reachability check
+#    ansible.builtin.ping verifies Python is available and SSH is working for
+#    every host in the play.  A failure here means Ansible cannot manage
+#    that node at all.
+# ---------------------------------------------------------------------------
+- name: Assert all target hosts are reachable via SSH
+  ansible.builtin.ping:
+  register: _ping_result
+
+- name: Confirm ping succeeded for each host
+  ansible.builtin.assert:
+    that:
+      - _ping_result.ping == "pong"
+    fail_msg: >
+      Host '{{ inventory_hostname }}' did not respond to the Ansible ping.
+      Verify SSH connectivity, credentials, and Python availability on the target.
+    success_msg: "Host '{{ inventory_hostname }}' is reachable."
+
+# ---------------------------------------------------------------------------
+# 3. Minimum OS check
+#    Supported: Ubuntu 20.04+, RHEL/CentOS/Rocky/AlmaLinux 8+
+# ---------------------------------------------------------------------------
+- name: Gather OS facts
+  ansible.builtin.setup:
+    gather_subset:
+      - distribution
+      - distribution_version
+
+- name: Assert supported OS distribution and version
+  ansible.builtin.assert:
+    that:
+      - >
+        (ansible_distribution == "Ubuntu" and ansible_distribution_version is version("20.04", ">="))
+        or
+        (ansible_distribution in ["RedHat", "CentOS", "Rocky", "AlmaLinux"] and
+         ansible_distribution_major_version | int >= 8)
+    fail_msg: >
+      Host '{{ inventory_hostname }}' is running {{ ansible_distribution }}
+      {{ ansible_distribution_version }}, which is not supported.
+      Supported platforms: Ubuntu 20.04+, RHEL/CentOS/Rocky/AlmaLinux 8+.
+    success_msg: >
+      Host '{{ inventory_hostname }}' OS check passed:
+      {{ ansible_distribution }} {{ ansible_distribution_version }}
+
+# ---------------------------------------------------------------------------
+# 4. Minimum disk space check on /  (>= 20 GB free)
+# ---------------------------------------------------------------------------
+- name: Gather disk facts for /
+  ansible.builtin.setup:
+    gather_subset:
+      - hardware
+    filter: ansible_mounts
+
+- name: Derive free disk space on / in GB
+  ansible.builtin.set_fact:
+    _root_free_gb: >-
+      {{
+        (ansible_mounts
+          | selectattr('mount', 'equalto', '/')
+          | map(attribute='size_available')
+          | first
+          | int) // 1073741824
+      }}
+
+- name: Assert at least 20 GB free disk space on /
+  ansible.builtin.assert:
+    that:
+      - _root_free_gb | int >= 20
+    fail_msg: >
+      Host '{{ inventory_hostname }}' has only {{ _root_free_gb }} GB free on /.
+      At least 20 GB is required. Free up disk space and re-run the playbook.
+    success_msg: >
+      Host '{{ inventory_hostname }}' disk check passed:
+      {{ _root_free_gb }} GB free on /.

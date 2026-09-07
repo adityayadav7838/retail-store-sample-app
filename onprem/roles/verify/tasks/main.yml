@@ -1,0 +1,212 @@
+---
+# =============================================================================
+# verify/tasks/main.yml
+# Post-deployment smoke tests — validates all critical components are Running
+# and reachable before declaring the deployment successful.
+# Requirements: 6.2
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Assert all pods in retail-store namespace are Running
+# ---------------------------------------------------------------------------
+- name: Get all pod statuses in retail-store namespace
+  ansible.builtin.command: >
+    kubectl get pods
+    --namespace retail-store
+    --output=jsonpath='{range .items[*]}{.metadata.name}={.status.phase}{"\n"}{end}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _retail_pods
+
+- name: Assert all retail-store pods are in Running phase
+  ansible.builtin.assert:
+    that:
+      - "'=Running' in item"
+    fail_msg: >
+      Pod check failed: {{ item }} — expected phase Running.
+      Run 'kubectl get pods -n retail-store' to investigate.
+    success_msg: "Pod {{ item.split('=')[0] }} is Running."
+  loop: "{{ _retail_pods.stdout_lines }}"
+  run_once: true
+  when: _retail_pods.stdout_lines | length > 0
+
+- name: Assert at least one pod exists in retail-store namespace
+  ansible.builtin.assert:
+    that:
+      - _retail_pods.stdout_lines | length > 0
+    fail_msg: >
+      No pods found in the retail-store namespace.
+      Verify that ArgoCD has synced the application manifests.
+    success_msg: "Found {{ _retail_pods.stdout_lines | length }} pod(s) in retail-store namespace."
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 2. Assert retail-store UI returns HTTP 200
+# ---------------------------------------------------------------------------
+- name: Check HTTP response from retail-store hostname
+  ansible.builtin.uri:
+    url: "http://{{ retail_store_hostname }}"
+    method: GET
+    status_code: 200
+    timeout: 30
+    follow_redirects: safe
+  run_once: true
+  delegate_to: localhost
+  register: _retail_http
+  retries: 3
+  delay: 10
+  until: _retail_http.status == 200
+
+- name: Assert retail-store UI is reachable (HTTP 200)
+  ansible.builtin.assert:
+    that:
+      - _retail_http.status == 200
+    fail_msg: >
+      Retail store UI at http://{{ retail_store_hostname }} returned
+      HTTP {{ _retail_http.status }}. Expected 200.
+      Verify NGINX Ingress and UI service are running correctly.
+    success_msg: "Retail store UI is reachable at http://{{ retail_store_hostname }} (HTTP 200)."
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 3. Assert ArgoCD UI returns HTTP 200 or 302
+# ---------------------------------------------------------------------------
+- name: Check HTTP response from ArgoCD hostname
+  ansible.builtin.uri:
+    url: "http://{{ argocd_hostname }}"
+    method: GET
+    status_code: [200, 302]
+    timeout: 30
+    follow_redirects: none
+  run_once: true
+  delegate_to: localhost
+  register: _argocd_http
+  retries: 3
+  delay: 10
+  until: _argocd_http.status in [200, 302]
+
+- name: Assert ArgoCD UI is reachable (HTTP 200 or 302)
+  ansible.builtin.assert:
+    that:
+      - _argocd_http.status in [200, 302]
+    fail_msg: >
+      ArgoCD UI at http://{{ argocd_hostname }} returned
+      HTTP {{ _argocd_http.status }}. Expected 200 or 302.
+      Verify ArgoCD pods and ingress configuration.
+    success_msg: "ArgoCD UI is reachable at http://{{ argocd_hostname }} (HTTP {{ _argocd_http.status }})."
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 4. Assert NGINX Ingress LoadBalancer has a non-pending EXTERNAL-IP
+# ---------------------------------------------------------------------------
+- name: Get NGINX Ingress LoadBalancer external IP
+  ansible.builtin.command: >
+    kubectl get svc ingress-nginx-controller
+    --namespace ingress-nginx
+    --output=jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _ingress_external_ip
+
+- name: Assert NGINX Ingress has a non-pending EXTERNAL-IP
+  ansible.builtin.assert:
+    that:
+      - _ingress_external_ip.stdout | length > 0
+      - _ingress_external_ip.stdout != "<pending>"
+    fail_msg: >
+      NGINX Ingress LoadBalancer service has no EXTERNAL-IP assigned (currently: '{{ _ingress_external_ip.stdout | default("<pending>") }}').
+      Check MetalLB IPAddressPool configuration and MetalLB speaker pod logs.
+    success_msg: "NGINX Ingress LoadBalancer EXTERNAL-IP: {{ _ingress_external_ip.stdout }}"
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 5. Assert Wazuh Manager pod is Running in wazuh namespace
+# ---------------------------------------------------------------------------
+- name: Get Wazuh Manager pod status
+  ansible.builtin.command: >
+    kubectl get pods
+    --namespace wazuh
+    --selector app=wazuh-manager
+    --output=jsonpath='{.items[0].status.phase}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_manager_status
+  failed_when: false
+
+- name: Assert Wazuh Manager pod is Running
+  ansible.builtin.assert:
+    that:
+      - _wazuh_manager_status.stdout == "Running"
+    fail_msg: >
+      Wazuh Manager pod is not Running (current phase: '{{ _wazuh_manager_status.stdout | default("not found") }}').
+      Run 'kubectl get pods -n wazuh' to investigate.
+    success_msg: "Wazuh Manager pod is Running in the wazuh namespace."
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 6. Collect assigned IPs for summary output
+# ---------------------------------------------------------------------------
+- name: Get NGINX Ingress LoadBalancer IP for summary
+  ansible.builtin.command: >
+    kubectl get svc ingress-nginx-controller
+    --namespace ingress-nginx
+    --output=jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _summary_ingress_ip
+  failed_when: false
+
+- name: Get ArgoCD service ClusterIP for summary
+  ansible.builtin.command: >
+    kubectl get svc argocd-server
+    --namespace argocd
+    --output=jsonpath='{.spec.clusterIP}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _summary_argocd_ip
+  failed_when: false
+
+- name: Get Wazuh Dashboard service IP for summary
+  ansible.builtin.command: >
+    kubectl get svc wazuh-dashboard
+    --namespace wazuh
+    --output=jsonpath='{.spec.clusterIP}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _summary_wazuh_ip
+  failed_when: false
+
+# ---------------------------------------------------------------------------
+# 7. Print deployment summary
+# ---------------------------------------------------------------------------
+- name: Print deployment summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================================"
+      - "  Retail Store On-Premises — Deployment Summary"
+      - "============================================================"
+      - "  NGINX Ingress EXTERNAL-IP : {{ _summary_ingress_ip.stdout | default('N/A') }}"
+      - ""
+      - "  Service Hostnames (add to /etc/hosts or local DNS):"
+      - "    {{ _summary_ingress_ip.stdout | default('<metallb-ip>') }}  {{ retail_store_hostname }}"
+      - "    {{ _summary_ingress_ip.stdout | default('<metallb-ip>') }}  {{ argocd_hostname }}"
+      - "    {{ _summary_ingress_ip.stdout | default('<metallb-ip>') }}  {{ wazuh_hostname }}"
+      - ""
+      - "  URLs:"
+      - "    Retail Store  : http://{{ retail_store_hostname }}"
+      - "    ArgoCD        : http://{{ argocd_hostname }}"
+      - "    Wazuh Dashboard: http://{{ wazuh_hostname }}"
+      - ""
+      - "  Internal ClusterIPs:"
+      - "    ArgoCD Server   : {{ _summary_argocd_ip.stdout | default('N/A') }}"
+      - "    Wazuh Dashboard : {{ _summary_wazuh_ip.stdout | default('N/A') }}"
+      - "============================================================"
+      - "  All smoke tests passed. Deployment is healthy."
+      - "============================================================"
+  run_once: true

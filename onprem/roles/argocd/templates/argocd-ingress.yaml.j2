@@ -1,0 +1,29 @@
+{# =============================================================================
+   argocd/templates/argocd-ingress.yaml.j2
+   Exposes the ArgoCD server via NGINX Ingress Controller using the local
+   hostname defined in group_vars/all.yml (argocd_hostname).
+   - ssl-redirect disabled: TLS not required for on-prem dev environment
+   - backend-protocol HTTP: ArgoCD runs in --insecure mode (no internal TLS)
+   Requirements: 5.5, 4.5
+============================================================================= #}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argocd-server-ingress
+  namespace: {{ argocd_namespace }}
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: {{ argocd_hostname }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  number: 80

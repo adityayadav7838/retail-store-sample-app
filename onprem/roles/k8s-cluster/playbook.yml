@@ -1,0 +1,8 @@
+---
+# Entry-point playbook for the k8s-cluster role.
+# Imported by onprem/site.yml after the preflight role succeeds.
+- name: Provision Kubernetes cluster
+  hosts: all
+  gather_facts: true
+  roles:
+    - role: k8s-cluster

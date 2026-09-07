@@ -1,0 +1,57 @@
+---
+# =============================================================================
+# k8s-cluster/tasks/main.yml
+# Dispatches to the correct cluster installer based on `cluster_type`.
+# Supported values (set in inventory/group_vars/all.yml):
+#   cluster_type: k3s      — lightweight, ideal for single-node / local dev
+#   cluster_type: kubeadm  — full multi-node cluster
+# After installation, waits for all nodes to reach Ready status.
+# Requirements: 1.1, 1.2, 1.4, 1.5
+# =============================================================================
+
+- name: Assert cluster_type is set to a supported value
+  ansible.builtin.assert:
+    that:
+      - cluster_type is defined
+      - cluster_type in ["k3s", "kubeadm"]
+    fail_msg: >
+      cluster_type must be 'k3s' or 'kubeadm'. Got: '{{ cluster_type | default("undefined") }}'.
+      Set the correct value in inventory/group_vars/all.yml.
+
+# ---------------------------------------------------------------------------
+# Dispatch to the appropriate installer
+# ---------------------------------------------------------------------------
+- name: Run k3s cluster tasks
+  ansible.builtin.include_tasks: k3s.yml
+  when: cluster_type == "k3s"
+
+- name: Run kubeadm cluster tasks
+  ansible.builtin.include_tasks: kubeadm.yml
+  when: cluster_type == "kubeadm"
+
+# ---------------------------------------------------------------------------
+# Post-install: wait for all nodes to be Ready (requirement 1.4)
+# Runs on the master node; delegates kubectl to wherever kubeconfig landed.
+# ------------------------------------- --------------------------------------
+- name: Wait for all cluster nodes to reach Ready status
+  ansible.builtin.command: >
+    kubectl wait --for=condition=Ready node --all --timeout=300s
+  delegate_to: "{{ groups['master'][0] }}"
+  run_once: true
+  changed_when: false
+  register: _nodes_ready
+  retries: 3
+  delay: 10
+  until: _nodes_ready.rc == 0
+
+- name: Show node status after cluster is ready
+  ansible.builtin.command: kubectl get nodes -o wide
+  delegate_to: "{{ groups['master'][0] }}"
+  run_once: true
+  changed_when: false
+  register: _node_list
+
+- name: Print node list
+  ansible.builtin.debug:
+    msg: "{{ _node_list.stdout_lines }}"
+  run_once: true

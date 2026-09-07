@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# helm-values/tasks/main.yml
+# Generates per-service on-prem Helm override value files (values-onprem.yaml)
+# for all five Retail Store services and writes them into each service's chart
+# directory. These files are referenced by ArgoCD alongside the base values.yaml.
+# Requirements: 3.1, 3.2, 3.3, 3.4, 3.5
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Ensure git_sha fact is available (set by build-push-images role)
+#    Fall back to image_tag from group_vars if build role was skipped.
+# ---------------------------------------------------------------------------
+- name: Set git_sha from image_tag fallback if not already defined
+  ansible.builtin.set_fact:
+    git_sha: "{{ image_tag }}"
+  when: git_sha is not defined
+  delegate_to: localhost
+  run_once: true
+
+- name: Display image tag being used in value overrides
+  ansible.builtin.debug:
+    msg: "Generating on-prem Helm values with image tag: {{ git_sha }}"
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 2. Render values-onprem.yaml for each service (Req 3.1, 3.2, 3.3, 3.4, 3.5)
+#    The template uses `service_name` to apply per-service conditional blocks.
+# ---------------------------------------------------------------------------
+- name: Render on-prem Helm override values for each service
+  ansible.builtin.template:
+    src: values-onprem.yaml.j2
+    dest: "{{ playbook_dir | dirname }}/src/{{ item }}/chart/values-onprem.yaml"
+    mode: "0644"
+  loop:
+    - ui
+    - catalog
+    - cart
+    - orders
+    - checkout
+  vars:
+    service_name: "{{ item }}"
+  delegate_to: localhost
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 3. Confirm generated files exist
+# ---------------------------------------------------------------------------
+- name: Verify values-onprem.yaml files were created
+  ansible.builtin.stat:
+    path: "{{ playbook_dir | dirname }}/src/{{ item }}/chart/values-onprem.yaml"
+  loop:
+    - ui
+    - catalog
+    - cart
+    - orders
+    - checkout
+  register: _values_stat
+  delegate_to: localhost
+  run_once: true
+
+- name: Assert all values-onprem.yaml files exist
+  ansible.builtin.assert:
+    that: item.stat.exists
+    fail_msg: "values-onprem.yaml was not created for {{ item.item }}"
+    success_msg: "values-onprem.yaml created for {{ item.item }}"
+  loop: "{{ _values_stat.results }}"
+  delegate_to: localhost
+  run_once: true
+
+- name: Summary — on-prem Helm value overrides generated
+  ansible.builtin.debug:
+    msg: >
+      On-prem values-onprem.yaml files written to src/<service>/chart/ for all
+      5 services with image tag {{ git_sha }} and registry
+      {{ registry_ip }}:{{ registry_port }}.
+  run_once: true

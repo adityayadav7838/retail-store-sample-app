@@ -1,0 +1,77 @@
+---
+# =============================================================================
+# Retail Store On-Premises — Central Configuration
+# Edit the values in this file to match your environment.
+# All roles read from this single file; no playbook code needs to change.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Kubernetes Cluster
+# -----------------------------------------------------------------------------
+# cluster_type: k3s        — lightweight single-node / small dev cluster
+# cluster_type: kubeadm    — full multi-node production-grade cluster
+cluster_type: k3s
+k8s_version: "1.28"
+pod_network_cidr: "10.244.0.0/16"
+
+# -----------------------------------------------------------------------------
+# Local Container Registry
+# -----------------------------------------------------------------------------
+# IP address of the node in the [registry] inventory group
+registry_ip: "192.168.1.50"
+registry_port: 5000
+
+# Image tag is overridden dynamically during the build-push-images role
+# using `git rev-parse --short HEAD`; set a static value only for testing.
+image_tag: "latest"
+
+# -----------------------------------------------------------------------------
+# MetalLB — Bare-Metal Load Balancer
+# -----------------------------------------------------------------------------
+# Define a contiguous range of IPs from your LAN that MetalLB may assign.
+# These IPs must NOT be managed by your DHCP server.
+metallb_ip_range: "192.168.1.200-192.168.1.220"
+
+# -----------------------------------------------------------------------------
+# ArgoCD / GitOps
+# -----------------------------------------------------------------------------
+argocd_namespace: argocd
+git_repo_url: "https://github.com/adityayadav7838/retail-store-sample-app"
+git_revision: main
+
+# Set to true and populate git_repo_username / git_repo_password if the
+# repository is private and requires authentication.
+git_repo_private: false
+git_repo_username: ""
+git_repo_password: ""   # Use Ansible Vault: ansible-vault encrypt_string 'password'
+
+# -----------------------------------------------------------------------------
+# Wazuh SIEM
+# -----------------------------------------------------------------------------
+wazuh_namespace: wazuh
+
+# Set after first deploy; used by agents to reach the manager.
+# Leave empty — the wazuh role resolves this from the Kubernetes service ClusterIP.
+wazuh_manager_ip: ""
+
+# Enrollment password used by Wazuh agents to auto-register with the manager.
+# Replace with a strong password and store in Ansible Vault.
+wazuh_enrollment_password: "changeme"   # vault: ansible-vault encrypt_string
+
+# Wazuh API / Dashboard RBAC user credentials
+wazuh_admin_password: "SecureAdmin@123"     # vault: ansible-vault encrypt_string
+wazuh_readonly_password: "SecureRead@123"  # vault: ansible-vault encrypt_string
+
+# Wazuh component versions — keep manager, indexer, and dashboard in sync
+wazuh_version: "4.7.0"
+
+# -----------------------------------------------------------------------------
+# Hostnames
+# -----------------------------------------------------------------------------
+# Add these entries to /etc/hosts on every client machine (or configure local DNS):
+#   <metallb-ip>  retail-store.local
+#   <metallb-ip>  argocd.local
+#   <metallb-ip>  wazuh.local
+retail_store_hostname: "retail-store.local"
+argocd_hostname: "argocd.local"
+wazuh_hostname: "wazuh.local"

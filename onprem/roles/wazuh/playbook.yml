@@ -1,0 +1,11 @@
+---
+# Entry-point playbook for the wazuh role.
+# Imported by onprem/site.yml after the helm-values role.
+#
+# The main.yml task includes sub-task files (agents.yml, audit.yml, rbac.yml)
+# that delegate to the appropriate inventory hosts as needed.
+- name: Deploy Wazuh SIEM stack and agents
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: wazuh

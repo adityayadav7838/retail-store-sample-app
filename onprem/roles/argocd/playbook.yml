@@ -1,0 +1,11 @@
+---
+# Entry-point playbook for the argocd role.
+# Imported by onprem/site.yml after the nginx-ingress role.
+#
+# All kubectl/helm commands run on the Ansible control node (localhost)
+# which is expected to have a valid kubeconfig for the on-prem cluster.
+- name: Install and configure ArgoCD
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: argocd

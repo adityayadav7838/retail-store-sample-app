@@ -1,0 +1,502 @@
+---
+# =============================================================================
+# wazuh/tasks/main.yml
+# Deploys Wazuh SIEM stack (Manager, Indexer, Dashboard) to Kubernetes,
+# configures the Manager, installs agents on all nodes, sets up Kubernetes
+# audit logging, creates RBAC users, and exposes the Dashboard via Ingress.
+# Requirements: 8.1, 8.2, 8.3, 8.4, 8.6, 8.7, 8.8
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Create wazuh namespace
+# ---------------------------------------------------------------------------
+- name: Create Wazuh namespace
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ wazuh_namespace }}"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 2. Deploy Wazuh Indexer (OpenSearch-based)
+# ConfigMap must be created before the StatefulSet that mounts it.
+# ---------------------------------------------------------------------------
+- name: Deploy Wazuh Indexer ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: indexer-config
+        namespace: "{{ wazuh_namespace }}"
+      data:
+        opensearch.yml: |
+          network.host: 0.0.0.0
+          node.name: wazuh-indexer-0
+          cluster.name: wazuh-indexer-cluster
+          cluster.initial_master_nodes:
+            - wazuh-indexer-0
+          discovery.type: single-node
+          plugins.security.ssl.http.enabled: false
+          plugins.security.ssl.transport.enabled: false
+          plugins.security.disabled: true
+  run_once: true
+  delegate_to: localhost
+
+- name: Deploy Wazuh Indexer Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: indexer
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        selector:
+          app: wazuh-indexer
+        ports:
+          - name: indexer-rest
+            port: 9200
+            targetPort: 9200
+          - name: indexer-nodes
+            port: 9300
+            targetPort: 9300
+        clusterIP: None
+  run_once: true
+  delegate_to: localhost
+
+- name: Deploy Wazuh Indexer StatefulSet
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: wazuh-indexer
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: wazuh-indexer
+        serviceName: indexer
+        template:
+          metadata:
+            labels:
+              app: wazuh-indexer
+          spec:
+            initContainers:
+              - name: volume-mount-hack
+                image: busybox
+                command: ["sh", "-c", "chown -R 1000:1000 /var/lib/wazuh-indexer"]
+                volumeMounts:
+                  - name: wazuh-indexer-data
+                    mountPath: /var/lib/wazuh-indexer
+            containers:
+              - name: wazuh-indexer
+                image: "wazuh/wazuh-indexer:{{ wazuh_version }}"
+                ports:
+                  - containerPort: 9200
+                    name: indexer-rest
+                  - containerPort: 9300
+                    name: indexer-nodes
+                env:
+                  - name: OPENSEARCH_JAVA_OPTS
+                    value: "-Xms512m -Xmx512m"
+                  - name: OPENSEARCH_PATH_CONF
+                    value: /usr/share/wazuh-indexer/config
+                volumeMounts:
+                  - name: wazuh-indexer-data
+                    mountPath: /var/lib/wazuh-indexer
+                  - name: indexer-config
+                    mountPath: /usr/share/wazuh-indexer/config/opensearch.yml
+                    subPath: opensearch.yml
+                resources:
+                  requests:
+                    memory: "1Gi"
+                    cpu: "500m"
+                  limits:
+                    memory: "2Gi"
+                    cpu: "1000m"
+            volumes:
+              - name: indexer-config
+                configMap:
+                  name: indexer-config
+        volumeClaimTemplates:
+          - metadata:
+              name: wazuh-indexer-data
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: local-path
+              resources:
+                requests:
+                  storage: 5Gi
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 3. Deploy Wazuh Manager
+# ConfigMap must be created before the StatefulSet that mounts it.
+# ---------------------------------------------------------------------------
+- name: Create Wazuh Manager ConfigMap with ossec.conf
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: manager-config
+        namespace: "{{ wazuh_namespace }}"
+      data:
+        ossec.conf: "{{ lookup('template', 'ossec-manager.conf.j2') }}"
+  run_once: true
+  delegate_to: localhost
+
+- name: Deploy Wazuh Manager Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: wazuh
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        selector:
+          app: wazuh-manager
+        ports:
+          - name: agentapi
+            port: 55000
+            targetPort: 55000
+          - name: agentevents
+            port: 1514
+            targetPort: 1514
+          - name: authd
+            port: 1515
+            targetPort: 1515
+          - name: syslog
+            port: 514
+            targetPort: 514
+            protocol: UDP
+        clusterIP: None
+  run_once: true
+  delegate_to: localhost
+
+- name: Deploy Wazuh Manager StatefulSet
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: wazuh-manager
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: wazuh-manager
+        serviceName: wazuh
+        template:
+          metadata:
+            labels:
+              app: wazuh-manager
+          spec:
+            containers:
+              - name: wazuh-manager
+                image: "wazuh/wazuh-manager:{{ wazuh_version }}"
+                ports:
+                  - containerPort: 1514
+                    name: agentevents
+                  - containerPort: 1515
+                    name: authd
+                  - containerPort: 514
+                    name: syslog
+                    protocol: UDP
+                  - containerPort: 55000
+                    name: agentapi
+                env:
+                  - name: WAZUH_MANAGER_INDEXER_HOST
+                    value: "indexer.{{ wazuh_namespace }}.svc.cluster.local"
+                  - name: FILEBEAT_SSL_VERIFICATION_MODE
+                    value: none
+                  # Write enrollment password to /var/ossec/etc/authd.pass
+                  # so wazuh-authd enforces password-based agent enrollment.
+                  # Requirements: 8.3 (agents register with enrollment password)
+                  - name: WAZUH_AUTHD_PASS
+                    value: "{{ wazuh_enrollment_password }}"
+                volumeMounts:
+                  - name: wazuh-manager-data
+                    mountPath: /var/ossec/data
+                  - name: wazuh-manager-logs
+                    mountPath: /var/ossec/logs
+                  - name: manager-config
+                    mountPath: /wazuh-config-mount/etc/ossec.conf
+                    subPath: ossec.conf
+                resources:
+                  requests:
+                    memory: "512Mi"
+                    cpu: "500m"
+                  limits:
+                    memory: "1Gi"
+                    cpu: "1000m"
+            volumes:
+              - name: manager-config
+                configMap:
+                  name: manager-config
+        volumeClaimTemplates:
+          - metadata:
+              name: wazuh-manager-data
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: local-path
+              resources:
+                requests:
+                  storage: 5Gi
+          - metadata:
+              name: wazuh-manager-logs
+            spec:
+              accessModes: ["ReadWriteOnce"]
+              storageClassName: local-path
+              resources:
+                requests:
+                  storage: 2Gi
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 4. Deploy Wazuh Dashboard
+# ---------------------------------------------------------------------------
+- name: Deploy Wazuh Dashboard Service
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: dashboard
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        selector:
+          app: wazuh-dashboard
+        ports:
+          - name: dashboard
+            port: 443
+            targetPort: 5601
+        type: ClusterIP
+  run_once: true
+  delegate_to: localhost
+
+- name: Deploy Wazuh Dashboard Deployment
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: wazuh-dashboard
+        namespace: "{{ wazuh_namespace }}"
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: wazuh-dashboard
+        template:
+          metadata:
+            labels:
+              app: wazuh-dashboard
+          spec:
+            containers:
+              - name: wazuh-dashboard
+                image: "wazuh/wazuh-dashboard:{{ wazuh_version }}"
+                ports:
+                  - containerPort: 5601
+                    name: dashboard
+                env:
+                  - name: INDEXER_URL
+                    value: "http://indexer.{{ wazuh_namespace }}.svc.cluster.local:9200"
+                  - name: WAZUH_API_URL
+                    value: "https://wazuh.{{ wazuh_namespace }}.svc.cluster.local"
+                  - name: DASHBOARD_USERNAME
+                    value: "admin"
+                  - name: DASHBOARD_PASSWORD
+                    value: "{{ wazuh_admin_password }}"
+                  - name: SERVER_SSL_ENABLED
+                    value: "false"
+                resources:
+                  requests:
+                    memory: "512Mi"
+                    cpu: "250m"
+                  limits:
+                    memory: "1Gi"
+                    cpu: "500m"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 5. Wait for all Wazuh components to be Running
+# ---------------------------------------------------------------------------
+- name: Wait for Wazuh Indexer to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ wazuh_namespace }}
+    --selector app=wazuh-indexer
+    --for=condition=Ready
+    --timeout=300s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_indexer_ready
+  retries: 3
+  delay: 20
+  until: _wazuh_indexer_ready.rc == 0
+
+- name: Wait for Wazuh Manager to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ wazuh_namespace }}
+    --selector app=wazuh-manager
+    --for=condition=Ready
+    --timeout=300s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_manager_ready
+  retries: 3
+  delay: 20
+  until: _wazuh_manager_ready.rc == 0
+
+- name: Wait for Wazuh Dashboard to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ wazuh_namespace }}
+    --selector app=wazuh-dashboard
+    --for=condition=Ready
+    --timeout=300s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_dashboard_ready
+  retries: 3
+  delay: 20
+  until: _wazuh_dashboard_ready.rc == 0
+
+# ---------------------------------------------------------------------------
+# 6. Retrieve Wazuh Manager ClusterIP for agent configuration
+# ---------------------------------------------------------------------------
+- name: Get Wazuh Manager service ClusterIP
+  ansible.builtin.command: >
+    kubectl get svc wazuh
+    --namespace {{ wazuh_namespace }}
+    -o jsonpath='{.spec.clusterIP}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_manager_clusterip
+
+- name: Set wazuh_manager_ip fact
+  ansible.builtin.set_fact:
+    wazuh_manager_ip: "{{ _wazuh_manager_clusterip.stdout }}"
+  run_once: true
+  delegate_to: localhost
+  when: _wazuh_manager_clusterip.stdout != ""
+
+# ---------------------------------------------------------------------------
+# 7. Reload Wazuh Manager to apply ossec.conf config — subtask 10.2
+# The ConfigMap was already applied before the StatefulSet; this step
+# handles updates to the config on subsequent playbook runs.
+# ---------------------------------------------------------------------------
+- name: Restart Wazuh Manager pod to pick up updated config
+  ansible.builtin.command: >
+    kubectl rollout restart statefulset/wazuh-manager
+    --namespace {{ wazuh_namespace }}
+  run_once: true
+  delegate_to: localhost
+  changed_when: true
+
+- name: Wait for Wazuh Manager rollout to complete
+  ansible.builtin.command: >
+    kubectl rollout status statefulset/wazuh-manager
+    --namespace {{ wazuh_namespace }}
+    --timeout=180s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+
+# ---------------------------------------------------------------------------
+# 8. Copy Kubernetes audit rules into Wazuh Manager — subtask 10.2
+# Uses kubectl cp to reliably transfer the XML file without shell escaping
+# issues. The file is copied into ruleset/rules/ so Wazuh loads it on
+# startup. Requirements: 8.6, 8.7
+# ---------------------------------------------------------------------------
+- name: Get Wazuh Manager pod name
+  ansible.builtin.command: >
+    kubectl get pod -n {{ wazuh_namespace }} -l app=wazuh-manager
+    -o jsonpath='{.items[0].metadata.name}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_manager_pod
+
+- name: Copy Kubernetes audit rules to Wazuh Manager pod
+  ansible.builtin.command: >
+    kubectl cp
+    {{ role_path }}/files/0470-kubernetes_rules.xml
+    {{ wazuh_namespace }}/{{ _wazuh_manager_pod.stdout }}:/var/ossec/ruleset/rules/0470-kubernetes_rules.xml
+  run_once: true
+  delegate_to: localhost
+  changed_when: true
+  when: _wazuh_manager_pod.stdout != ""
+
+- name: Reload Wazuh Manager rules via API (ossec-control reload)
+  ansible.builtin.command: >
+    kubectl exec -n {{ wazuh_namespace }} {{ _wazuh_manager_pod.stdout }}
+    -- /var/ossec/bin/ossec-control reload
+  run_once: true
+  delegate_to: localhost
+  changed_when: true
+  when: _wazuh_manager_pod.stdout != ""
+  ignore_errors: true   # non-fatal: restart in step 7 already applies the config
+
+# ---------------------------------------------------------------------------
+# 9. Install Wazuh agents on master and worker nodes — subtask 10.3
+# ---------------------------------------------------------------------------
+- name: Install and configure Wazuh agents
+  ansible.builtin.include_tasks: agents.yml
+
+# ---------------------------------------------------------------------------
+# 10. Configure Kubernetes audit logging — subtask 10.4
+# ---------------------------------------------------------------------------
+- name: Configure Kubernetes audit logging
+  ansible.builtin.include_tasks: audit.yml
+
+# ---------------------------------------------------------------------------
+# 11. Create Wazuh RBAC users via API — subtask 10.5
+# ---------------------------------------------------------------------------
+- name: Create Wazuh RBAC users
+  ansible.builtin.include_tasks: rbac.yml
+
+# ---------------------------------------------------------------------------
+# 12. Apply Wazuh Dashboard Ingress — subtask 10.6
+# ---------------------------------------------------------------------------
+- name: Apply Wazuh Dashboard Ingress
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'wazuh-ingress.yaml.j2') }}"
+  run_once: true
+  delegate_to: localhost
+
+- name: Confirm Wazuh deployment
+  ansible.builtin.debug:
+    msg: >
+      Wazuh SIEM stack deployed successfully.
+      Dashboard: http://{{ wazuh_hostname }}
+      Namespace: {{ wazuh_namespace }}
+      Manager IP: {{ wazuh_manager_ip | default('(resolve via kubectl)') }}
+  run_once: true

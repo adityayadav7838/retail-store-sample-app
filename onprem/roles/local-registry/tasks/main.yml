@@ -1,0 +1,107 @@
+---
+# =============================================================================
+# local-registry/tasks/main.yml
+# Deploys Docker Registry v2 on the [registry] host and configures every
+# Kubernetes node to trust it as an insecure registry in containerd.
+# Requirements: 2.1, 2.2, 2.5
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Deploy Docker Registry v2 on the registry host (requirement 2.1)
+# ---------------------------------------------------------------------------
+- name: Check if registry container is already running
+  ansible.builtin.command: docker inspect --format='{{ '{{' }}.State.Running{{ '}}' }}' registry
+  register: _registry_running
+  changed_when: false
+  failed_when: false
+  when: inventory_hostname in groups['registry']
+
+- name: Deploy Docker Registry v2 container
+  ansible.builtin.command: >
+    docker run -d
+    -p {{ registry_port }}:5000
+    --restart=always
+    --name registry
+    registry:2
+  when:
+    - inventory_hostname in groups['registry']
+    - _registry_running.rc != 0 or _registry_running.stdout != 'true'
+  register: _registry_started
+
+- name: Wait for registry port to be available
+  ansible.builtin.wait_for:
+    host: "{{ registry_ip }}"
+    port: "{{ registry_port }}"
+    timeout: 60
+  delegate_to: localhost
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 2. Configure containerd on every Kubernetes node to trust the local
+#    registry as insecure (requirement 2.5)
+#    Applies to: [master] + [workers]
+# ---------------------------------------------------------------------------
+- name: Ensure containerd config directory exists
+  ansible.builtin.file:
+    path: /etc/containerd
+    state: directory
+    mode: "0755"
+  when: inventory_hostname in (groups['master'] + groups['workers'] | default([]))
+
+- name: Retrieve existing containerd config (if any)
+  ansible.builtin.command: containerd config default
+  register: _containerd_default_cfg
+  changed_when: false
+  when:
+    - inventory_hostname in (groups['master'] + groups['workers'] | default([]))
+    - not (ansible_check_mode | default(false))
+
+- name: Write base containerd config.toml when missing
+  ansible.builtin.copy:
+    dest: /etc/containerd/config.toml
+    content: "{{ _containerd_default_cfg.stdout }}"
+    mode: "0644"
+    force: false          # only write if file does not already exist
+  when:
+    - inventory_hostname in (groups['master'] + groups['workers'] | default([]))
+    - _containerd_default_cfg.stdout is defined
+    - _containerd_default_cfg.stdout | length > 0
+
+- name: Apply insecure-registry template to containerd config
+  ansible.builtin.template:
+    src: containerd-config.toml.j2
+    dest: /etc/containerd/config.toml
+    mode: "0644"
+    backup: true
+  when: inventory_hostname in (groups['master'] + groups['workers'] | default([]))
+  register: _containerd_cfg_updated
+  notify: Restart containerd
+
+# ---------------------------------------------------------------------------
+# 3. Flush handlers so containerd is restarted before the verify step
+# ---------------------------------------------------------------------------
+- name: Flush handlers to apply containerd config changes
+  ansible.builtin.meta: flush_handlers
+
+# ---------------------------------------------------------------------------
+# 4. Verify registry is reachable from the Ansible control node (req. 2.2)
+# ---------------------------------------------------------------------------
+- name: Verify local registry responds on /v2/
+  ansible.builtin.uri:
+    url: "http://{{ registry_ip }}:{{ registry_port }}/v2/"
+    method: GET
+    status_code: 200
+  delegate_to: localhost
+  run_once: true
+  retries: 5
+  delay: 10
+  register: _registry_health
+  until: _registry_health.status == 200
+
+- name: Confirm registry is healthy
+  ansible.builtin.debug:
+    msg: >
+      Local registry is reachable at
+      http://{{ registry_ip }}:{{ registry_port }}/v2/
+      (HTTP {{ _registry_health.status }})
+  run_once: true

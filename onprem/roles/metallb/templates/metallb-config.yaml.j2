@@ -1,0 +1,20 @@
+---
+# MetalLB IPAddressPool — allocates IPs from the range defined in group_vars/all.yml
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: retail-store-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - {{ metallb_ip_range }}
+---
+# L2Advertisement — advertises the pool via Layer 2 (ARP/NDP), no BGP required
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: retail-store-l2advert
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+    - retail-store-pool

@@ -1,0 +1,8 @@
+---
+# Entry-point playbook for the verify role.
+# Imported by onprem/site.yml as the final step.
+- name: Post-deployment smoke tests
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: verify

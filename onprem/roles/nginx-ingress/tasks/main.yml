@@ -1,0 +1,93 @@
+---
+# =============================================================================
+# nginx-ingress/tasks/main.yml
+# Installs the NGINX Ingress Controller via Helm in the ingress-nginx namespace
+# with service.type=LoadBalancer (MetalLB assigns the external IP).
+# All AWS-specific service annotations are explicitly absent/disabled.
+# Requirements: 4.1, 4.3
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Add ingress-nginx Helm repository
+# ---------------------------------------------------------------------------
+- name: Add ingress-nginx Helm repository
+  kubernetes.core.helm_repository:
+    name: ingress-nginx
+    repo_url: https://kubernetes.github.io/ingress-nginx
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 2. Install ingress-nginx Helm chart
+#    - service.type: LoadBalancer  → MetalLB assigns an IP from its pool
+#    - All AWS-specific annotations (ELB, NLB, ACM, WAF, shield) are
+#      explicitly absent; no annotation overrides referencing amazonaws.com
+# ---------------------------------------------------------------------------
+- name: Install ingress-nginx Helm chart
+  kubernetes.core.helm:
+    name: ingress-nginx
+    chart_ref: ingress-nginx/ingress-nginx
+    release_namespace: ingress-nginx
+    create_namespace: true
+    wait: true
+    wait_timeout: 180s
+    values:
+      controller:
+        service:
+          type: LoadBalancer
+          # No AWS NLB / ALB annotations — plain L4 LoadBalancer for MetalLB
+          annotations: {}
+        # Disable AWS-specific features enabled in cloud installs
+        admissionWebhooks:
+          enabled: true
+        metrics:
+          enabled: false
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 3. Wait for ingress controller pod to reach Running / Ready state
+# ---------------------------------------------------------------------------
+- name: Wait for ingress-nginx controller pod to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace ingress-nginx
+    --selector app.kubernetes.io/component=controller
+    --for=condition=Ready
+    --timeout=120s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _nginx_pod_ready
+  retries: 3
+  delay: 15
+  until: _nginx_pod_ready.rc == 0
+
+# ---------------------------------------------------------------------------
+# 4. Poll until the LoadBalancer service has an EXTERNAL-IP from MetalLB
+#    Tries every 10 s up to the 120 s timeout (12 retries).
+# ---------------------------------------------------------------------------
+- name: Poll for EXTERNAL-IP assignment on ingress-nginx LoadBalancer service
+  ansible.builtin.command: >
+    kubectl get svc ingress-nginx-controller
+    --namespace ingress-nginx
+    --output=jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _nginx_external_ip
+  retries: 12
+  delay: 10
+  until: _nginx_external_ip.stdout | length > 0
+  failed_when: _nginx_external_ip.stdout | length == 0 and _nginx_external_ip.attempts >= 12
+
+# ---------------------------------------------------------------------------
+# 5. Confirm successful deployment
+# ---------------------------------------------------------------------------
+- name: Confirm NGINX Ingress Controller external IP
+  ansible.builtin.debug:
+    msg: >
+      NGINX Ingress Controller is ready.
+      EXTERNAL-IP: {{ _nginx_external_ip.stdout }}
+      (namespace: ingress-nginx, service.type: LoadBalancer via MetalLB)
+  run_once: true

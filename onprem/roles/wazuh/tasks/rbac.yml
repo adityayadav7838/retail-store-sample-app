@@ -1,0 +1,180 @@
+---
+# =============================================================================
+# wazuh/tasks/rbac.yml
+# Creates Wazuh RBAC users via the Wazuh Manager API after the stack is up.
+# Credentials are sourced from group_vars/all.yml (Ansible Vault protected).
+# Requirements: 8.8
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Resolve the Wazuh Manager API endpoint (NodePort on master node)
+# ---------------------------------------------------------------------------
+- name: Get Wazuh Manager node port for API (55000)
+  ansible.builtin.command: >
+    kubectl get svc wazuh
+    --namespace {{ wazuh_namespace }}
+    -o jsonpath='{.spec.ports[?(@.name=="agentapi")].nodePort}'
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _wazuh_api_nodeport
+  failed_when: _wazuh_api_nodeport.stdout == ""
+
+- name: Set Wazuh API base URL
+  ansible.builtin.set_fact:
+    _wazuh_api_url: "https://{{ groups['master'][0] }}:{{ _wazuh_api_nodeport.stdout }}"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# Obtain a JWT token from the Wazuh API using default admin credentials
+# The default admin user is 'wazuh' with password 'wazuh' on first deploy.
+# We immediately update the password after obtaining the token.
+# ---------------------------------------------------------------------------
+- name: Obtain Wazuh API JWT token (default credentials)
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/user/authenticate"
+    method: POST
+    url_username: wazuh
+    url_password: wazuh
+    force_basic_auth: true
+    validate_certs: false
+    status_code: [200, 401]
+  run_once: true
+  delegate_to: localhost
+  register: _wazuh_token_response
+  no_log: true
+  retries: 5
+  delay: 15
+  until: _wazuh_token_response.status in [200, 401]
+
+- name: Set Wazuh API JWT token fact
+  ansible.builtin.set_fact:
+    _wazuh_jwt: "{{ _wazuh_token_response.json.data.token }}"
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+  when: _wazuh_token_response.status == 200
+
+# ---------------------------------------------------------------------------
+# Update the built-in 'wazuh' admin password to the vault-stored value
+# ---------------------------------------------------------------------------
+- name: Update default Wazuh admin password
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/users/1"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ _wazuh_jwt }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      password: "{{ wazuh_admin_password }}"
+    validate_certs: false
+    status_code: [200, 400]
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+  when: _wazuh_jwt is defined
+
+# Re-authenticate with the updated admin password
+- name: Re-authenticate with updated admin password
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/user/authenticate"
+    method: POST
+    url_username: wazuh
+    url_password: "{{ wazuh_admin_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  run_once: true
+  delegate_to: localhost
+  register: _wazuh_token_admin
+  no_log: true
+  retries: 3
+  delay: 5
+  until: _wazuh_token_admin.status == 200
+
+- name: Update JWT token fact after password change
+  ansible.builtin.set_fact:
+    _wazuh_jwt: "{{ _wazuh_token_admin.json.data.token }}"
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Check if 'readonly' user already exists to make task idempotent
+# ---------------------------------------------------------------------------
+- name: List existing Wazuh users
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/users"
+    method: GET
+    headers:
+      Authorization: "Bearer {{ _wazuh_jwt }}"
+    validate_certs: false
+    status_code: 200
+  run_once: true
+  delegate_to: localhost
+  register: _wazuh_users
+  no_log: true
+
+- name: Set existing usernames fact
+  ansible.builtin.set_fact:
+    _wazuh_existing_users: "{{ _wazuh_users.json.data.affected_items | map(attribute='username') | list }}"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# Create 'readonly' user if it doesn't already exist
+# Requirements: 8.8
+# ---------------------------------------------------------------------------
+- name: Create Wazuh 'readonly' user
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/users"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _wazuh_jwt }}"
+      Content-Type: application/json
+    body_format: json
+    body:
+      username: readonly
+      password: "{{ wazuh_readonly_password }}"
+    validate_certs: false
+    status_code: [200, 201]
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+  when: "'readonly' not in _wazuh_existing_users"
+  register: _readonly_user_created
+
+# ---------------------------------------------------------------------------
+# Assign the built-in 'readonly' role (id=2) to the readonly user
+# ---------------------------------------------------------------------------
+- name: Get readonly user ID
+  ansible.builtin.set_fact:
+    _readonly_user_id: "{{ _readonly_user_created.json.data.affected_items[0].id }}"
+  run_once: true
+  delegate_to: localhost
+  when:
+    - _readonly_user_created is not skipped
+    - _readonly_user_created.json.data.affected_items is defined
+
+- name: Assign readonly role to readonly user
+  ansible.builtin.uri:
+    url: "{{ _wazuh_api_url }}/security/users/{{ _readonly_user_id }}/roles?role_ids=2"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ _wazuh_jwt }}"
+    validate_certs: false
+    status_code: [200, 201]
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+  when: _readonly_user_id is defined
+
+- name: Confirm Wazuh RBAC users configured
+  ansible.builtin.debug:
+    msg: >
+      Wazuh RBAC users configured.
+      admin: full access (updated from default).
+      readonly: read-only dashboard access.
+  run_once: true

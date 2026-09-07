@@ -1,0 +1,116 @@
+---
+# =============================================================================
+# wazuh/tasks/agents.yml
+# Installs and configures the Wazuh agent on every master and worker node.
+# Requirements: 8.3, 8.4, 8.7
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Detect OS family so we use the correct package manager
+# ---------------------------------------------------------------------------
+- name: Detect OS family on nodes
+  ansible.builtin.setup:
+    gather_subset:
+      - os_family
+      - distribution
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['master'] + groups['workers'] }}"
+  run_once: false
+
+# ---------------------------------------------------------------------------
+# Add Wazuh APT repository (Debian / Ubuntu)
+# ---------------------------------------------------------------------------
+- name: Add Wazuh GPG key (Debian)
+  ansible.builtin.apt_key:
+    url: https://packages.wazuh.com/key/GPG-KEY-WAZUH
+    state: present
+  when: hostvars[inventory_hostname]['ansible_os_family'] == 'Debian'
+  become: true
+
+- name: Add Wazuh APT repository (Debian)
+  ansible.builtin.apt_repository:
+    repo: "deb https://packages.wazuh.com/4.x/apt/ stable main"
+    state: present
+    filename: wazuh
+    update_cache: true
+  when: hostvars[inventory_hostname]['ansible_os_family'] == 'Debian'
+  become: true
+
+# ---------------------------------------------------------------------------
+# Add Wazuh YUM repository (RHEL / CentOS)
+# ---------------------------------------------------------------------------
+- name: Add Wazuh YUM repository (RedHat)
+  ansible.builtin.yum_repository:
+    name: wazuh
+    description: Wazuh repository
+    baseurl: "https://packages.wazuh.com/4.x/yum/"
+    gpgcheck: true
+    gpgkey: "https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+    enabled: true
+  when: hostvars[inventory_hostname]['ansible_os_family'] == 'RedHat'
+  become: true
+
+# ---------------------------------------------------------------------------
+# Install Wazuh agent at pinned version matching the manager
+# ---------------------------------------------------------------------------
+- name: Install Wazuh agent (Debian)
+  ansible.builtin.apt:
+    name: "wazuh-agent={{ wazuh_version }}-*"
+    state: present
+    allow_downgrades: true
+  when: hostvars[inventory_hostname]['ansible_os_family'] == 'Debian'
+  become: true
+
+- name: Install Wazuh agent (RedHat)
+  ansible.builtin.yum:
+    name: "wazuh-agent-{{ wazuh_version }}"
+    state: present
+  when: hostvars[inventory_hostname]['ansible_os_family'] == 'RedHat'
+  become: true
+
+# ---------------------------------------------------------------------------
+# Deploy agent ossec.conf from template
+# ---------------------------------------------------------------------------
+- name: Deploy Wazuh agent configuration
+  ansible.builtin.template:
+    src: ossec-agent.conf.j2
+    dest: /var/ossec/etc/ossec.conf
+    owner: root
+    group: wazuh
+    mode: "0640"
+  become: true
+  notify: Restart wazuh-agent
+
+# ---------------------------------------------------------------------------
+# Set enrollment password for auto-registration with manager authd
+# ---------------------------------------------------------------------------
+- name: Write Wazuh agent enrollment password
+  ansible.builtin.copy:
+    content: "{{ wazuh_enrollment_password }}"
+    dest: /var/ossec/etc/authd.pass
+    owner: root
+    group: wazuh
+    mode: "0640"
+  become: true
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# Enable and start the wazuh-agent systemd service
+# ---------------------------------------------------------------------------
+- name: Enable and start wazuh-agent service
+  ansible.builtin.systemd:
+    name: wazuh-agent
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true
+
+# ---------------------------------------------------------------------------
+# Verify agent is running
+# ---------------------------------------------------------------------------
+- name: Verify wazuh-agent service is active
+  ansible.builtin.command: systemctl is-active wazuh-agent
+  changed_when: false
+  become: true
+  register: _agent_status
+  failed_when: _agent_status.stdout != 'active'

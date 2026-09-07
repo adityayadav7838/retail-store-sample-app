@@ -1,0 +1,172 @@
+---
+# =============================================================================
+# argocd/tasks/main.yml
+# Installs ArgoCD via Helm, applies the retail-store project and application
+# manifests (with on-prem value file overrides), and exposes ArgoCD via an
+# NGINX Ingress resource.
+# Requirements: 5.1, 5.2, 5.3, 5.5
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Add ArgoCD Helm repository
+# ---------------------------------------------------------------------------
+- name: Add ArgoCD Helm repository
+  kubernetes.core.helm_repository:
+    name: argo
+    repo_url: https://argoproj.github.io/argo-helm
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 2. Install ArgoCD via Helm in argocd namespace
+#    - server.extraArgs: ["--insecure"]  → disables ArgoCD's own TLS; TLS is
+#      terminated at the NGINX Ingress layer instead
+#    - server.service.type: ClusterIP    → no cloud LoadBalancer needed;
+#      traffic enters via the Ingress resource below
+# ---------------------------------------------------------------------------
+- name: Install ArgoCD Helm chart
+  kubernetes.core.helm:
+    name: argocd
+    chart_ref: argo/argo-cd
+    release_namespace: "{{ argocd_namespace }}"
+    create_namespace: true
+    wait: true
+    wait_timeout: 300s
+    values:
+      server:
+        extraArgs:
+          - "--insecure"
+        service:
+          type: ClusterIP
+      configs:
+        params:
+          server.insecure: true
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 3. Wait for all ArgoCD pods to be Running / Ready
+# ---------------------------------------------------------------------------
+- name: Wait for ArgoCD server pod to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ argocd_namespace }}
+    --selector app.kubernetes.io/name=argocd-server
+    --for=condition=Ready
+    --timeout=180s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _argocd_server_ready
+  retries: 3
+  delay: 15
+  until: _argocd_server_ready.rc == 0
+
+- name: Wait for ArgoCD repo-server pod to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ argocd_namespace }}
+    --selector app.kubernetes.io/name=argocd-repo-server
+    --for=condition=Ready
+    --timeout=180s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _argocd_repo_ready
+  retries: 3
+  delay: 15
+  until: _argocd_repo_ready.rc == 0
+
+- name: Wait for ArgoCD application-controller pod to be Ready
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace {{ argocd_namespace }}
+    --selector app.kubernetes.io/name=argocd-application-controller
+    --for=condition=Ready
+    --timeout=180s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _argocd_ctrl_ready
+  retries: 3
+  delay: 15
+  until: _argocd_ctrl_ready.rc == 0
+
+# ---------------------------------------------------------------------------
+# 4. Configure private repository credentials (optional)
+#    Only applied when git_repo_private is set to true in group_vars/all.yml
+# ---------------------------------------------------------------------------
+- name: Create ArgoCD repository credentials secret (private repo)
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: retail-store-repo
+        namespace: "{{ argocd_namespace }}"
+        labels:
+          argocd.argoproj.io/secret-type: repository
+      stringData:
+        type: git
+        url: "{{ git_repo_url }}"
+        username: "{{ git_repo_username }}"
+        password: "{{ git_repo_password }}"
+  when: git_repo_private | bool
+  run_once: true
+  delegate_to: localhost
+  no_log: true
+
+# ---------------------------------------------------------------------------
+# 5. Apply the retail-store ArgoCD AppProject
+# ---------------------------------------------------------------------------
+- name: Apply retail-store ArgoCD AppProject
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ playbook_dir }}/../../argocd/projects/retail-store-project.yaml"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 6. Apply ArgoCD Application manifests with on-prem valueFiles override
+#    Each application is patched in-memory to inject values-onprem.yaml into
+#    helm.valueFiles so the base values.yaml is preserved alongside it.
+# ---------------------------------------------------------------------------
+- name: Load and apply ArgoCD Application manifests with on-prem value overrides
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'argocd-application.yaml.j2') }}"
+  loop:
+    - { name: retail-store-cart,     path: src/cart/chart,     revision: "{{ git_revision }}" }
+    - { name: retail-store-catalog,  path: src/catalog/chart,  revision: "{{ git_revision }}" }
+    - { name: retail-store-checkout, path: src/checkout/chart, revision: "{{ git_revision }}" }
+    - { name: retail-store-orders,   path: src/orders/chart,   revision: "{{ git_revision }}" }
+    - { name: retail-store-ui,       path: src/ui/chart,       revision: "{{ git_revision }}" }
+  loop_control:
+    loop_var: app
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 7. Apply ArgoCD Ingress resource (exposes ArgoCD UI via NGINX / MetalLB)
+# ---------------------------------------------------------------------------
+- name: Apply ArgoCD Ingress resource
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'argocd-ingress.yaml.j2') }}"
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 8. Confirm successful deployment
+# ---------------------------------------------------------------------------
+- name: Confirm ArgoCD deployment
+  ansible.builtin.debug:
+    msg: >
+      ArgoCD is installed and configured.
+      UI accessible at: http://{{ argocd_hostname }}
+      Namespace: {{ argocd_namespace }}
+      Applications applied: retail-store-cart, retail-store-catalog,
+        retail-store-checkout, retail-store-orders, retail-store-ui
+      Each application uses: values.yaml + values-onprem.yaml
+  run_once: true

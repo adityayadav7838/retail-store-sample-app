@@ -1,0 +1,92 @@
+---
+# =============================================================================
+# metallb/tasks/main.yml
+# Installs MetalLB via Helm and configures an L2 IP address pool using
+# the `metallb_ip_range` defined in inventory/group_vars/all.yml.
+# Requirements: 4.2
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Add MetalLB Helm repository
+# ---------------------------------------------------------------------------
+- name: Add MetalLB Helm repository
+  kubernetes.core.helm_repository:
+    name: metallb
+    repo_url: https://metallb.github.io/metallb
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 2. Install MetalLB via Helm in metallb-system namespace
+# ---------------------------------------------------------------------------
+- name: Install MetalLB Helm chart
+  kubernetes.core.helm:
+    name: metallb
+    chart_ref: metallb/metallb
+    release_namespace: metallb-system
+    create_namespace: true
+    wait: true
+    wait_timeout: 300s
+    values:
+      # Disable default address pools — we configure them via CRs below
+      speaker:
+        frr:
+          enabled: false
+  run_once: true
+  delegate_to: localhost
+
+# ---------------------------------------------------------------------------
+# 3. Wait for MetalLB controller and speaker pods to be Running
+# ---------------------------------------------------------------------------
+- name: Wait for MetalLB controller pod to be Running
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace metallb-system
+    --selector app.kubernetes.io/component=controller
+    --for=condition=Ready
+    --timeout=120s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _metallb_controller_ready
+  retries: 3
+  delay: 10
+  until: _metallb_controller_ready.rc == 0
+
+- name: Wait for MetalLB speaker pods to be Running
+  ansible.builtin.command: >
+    kubectl wait pod
+    --namespace metallb-system
+    --selector app.kubernetes.io/component=speaker
+    --for=condition=Ready
+    --timeout=120s
+  run_once: true
+  delegate_to: localhost
+  changed_when: false
+  register: _metallb_speaker_ready
+  retries: 3
+  delay: 10
+  until: _metallb_speaker_ready.rc == 0
+
+# ---------------------------------------------------------------------------
+# 4. Apply IPAddressPool and L2Advertisement using metallb_ip_range
+#    Brief pause ensures MetalLB webhook is ready to accept CRs
+# ---------------------------------------------------------------------------
+- name: Wait for MetalLB webhook to become available
+  ansible.builtin.pause:
+    seconds: 10
+  run_once: true
+
+- name: Apply MetalLB IPAddressPool and L2Advertisement
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'metallb-config.yaml.j2') }}"
+  run_once: true
+  delegate_to: localhost
+
+- name: Confirm MetalLB IP pool configuration
+  ansible.builtin.debug:
+    msg: >
+      MetalLB is configured with IP pool: {{ metallb_ip_range }}
+      (L2 advertisement mode, namespace: metallb-system)
+  run_once: true

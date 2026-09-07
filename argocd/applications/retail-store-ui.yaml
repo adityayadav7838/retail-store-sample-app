@@ -8,12 +8,13 @@ metadata:
 spec:
   project: retail-store
   source:
-    repoURL: https://github.com/adityayadav7838/retail-store-sample-app
-    targetRevision: main
+    repoURL: https://github.com/adityayadav7838/retail-store-sample-app-through-ansible
+    targetRevision: on-prem
     path: src/ui/chart
     helm:
       valueFiles:
         - values.yaml
+        - values-onprem.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: retail-store

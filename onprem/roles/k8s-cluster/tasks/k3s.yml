@@ -1,0 +1,126 @@
+---
+# =============================================================================
+# k8s-cluster/tasks/k3s.yml
+# Installs a k3s cluster: server on master, agents on workers.
+# Copies the generated kubeconfig to the Ansible control node.
+# Requirements: 1.1, 1.2
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# 1. Install k3s server on the master node
+# ---------------------------------------------------------------------------
+- name: Check if k3s is already installed on master
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: _k3s_binary
+  when: inventory_hostname in groups['master']
+
+- name: Install k3s server on master node
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v{{ k8s_version }}+k3s1" sh -s - server \
+      --cluster-cidr="{{ pod_network_cidr }}" \
+      --write-kubeconfig-mode=644
+  args:
+    creates: /usr/local/bin/k3s
+  when:
+    - inventory_hostname in groups['master']
+    - not _k3s_binary.stat.exists
+  register: _k3s_install
+
+- name: Wait for k3s service to be active on master
+  ansible.builtin.systemd:
+    name: k3s
+    state: started
+    enabled: true
+  when: inventory_hostname in groups['master']
+
+- name: Wait for k3s API server to become available
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: 6443
+    timeout: 120
+  delegate_to: localhost
+  when: inventory_hostname in groups['master']
+
+# ---------------------------------------------------------------------------
+# 2. Retrieve the node token needed for worker join
+# ---------------------------------------------------------------------------
+- name: Read k3s node token from master
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: _k3s_token_raw
+  delegate_to: "{{ groups['master'][0] }}"
+  run_once: true
+
+- name: Store k3s node token as a fact
+  ansible.builtin.set_fact:
+    k3s_node_token: "{{ _k3s_token_raw.content | b64decode | trim }}"
+  run_once: true
+
+# ---------------------------------------------------------------------------
+# 3. Install k3s agent on each worker node
+# ---------------------------------------------------------------------------
+- name: Check if k3s agent is already installed on worker
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: _k3s_agent_binary
+  when: inventory_hostname in groups['workers'] | default([])
+
+- name: Install k3s agent on worker nodes
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION="v{{ k8s_version }}+k3s1" \
+      K3S_URL="https://{{ hostvars[groups['master'][0]]['ansible_host'] | default(groups['master'][0]) }}:6443" \
+      K3S_TOKEN="{{ k3s_node_token }}" \
+      sh -s - agent
+  args:
+    creates: /usr/local/bin/k3s
+  when:
+    - inventory_hostname in groups['workers'] | default([])
+    - not _k3s_agent_binary.stat.exists
+
+- name: Wait for k3s-agent service to be active on workers
+  ansible.builtin.systemd:
+    name: k3s-agent
+    state: started
+    enabled: true
+  when: inventory_hostname in groups['workers'] | default([])
+
+# ---------------------------------------------------------------------------
+# 4. Copy kubeconfig to the Ansible control node
+# ---------------------------------------------------------------------------
+- name: Fetch k3s kubeconfig from master
+  ansible.builtin.fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: /tmp/k3s-kubeconfig.yaml
+    flat: true
+  delegate_to: "{{ groups['master'][0] }}"
+  run_once: true
+
+- name: Read fetched kubeconfig content
+  ansible.builtin.slurp:
+    src: /tmp/k3s-kubeconfig.yaml
+  delegate_to: localhost
+  run_once: true
+  register: _kubeconfig_raw
+
+- name: Replace localhost with master IP in kubeconfig
+  ansible.builtin.copy:
+    dest: "{{ lookup('env', 'HOME') }}/.kube/config"
+    content: >-
+      {{
+        (_kubeconfig_raw.content | b64decode)
+        | regex_replace('https://127\\.0\\.0\\.1:6443',
+            'https://' + (hostvars[groups['master'][0]]['ansible_host'] | default(groups['master'][0])) + ':6443')
+        | regex_replace('https://localhost:6443',
+            'https://' + (hostvars[groups['master'][0]]['ansible_host'] | default(groups['master'][0])) + ':6443')
+      }}
+    mode: "0600"
+  delegate_to: localhost
+  run_once: true
+
+- name: Clean up temporary kubeconfig file
+  ansible.builtin.file:
+    path: /tmp/k3s-kubeconfig.yaml
+    state: absent
+  delegate_to: localhost
+  run_once: true

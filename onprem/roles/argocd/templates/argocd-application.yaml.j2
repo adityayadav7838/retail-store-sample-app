@@ -1,0 +1,33 @@
+{# =============================================================================
+   argocd/templates/argocd-application.yaml.j2
+   Renders an ArgoCD Application manifest for a single retail-store service.
+   Adds values-onprem.yaml to helm.valueFiles alongside the base values.yaml.
+   Loop variable: `app` with keys: name, path, revision
+   Requirements: 5.2, 3.1
+============================================================================= #}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ app.name }}
+  namespace: {{ argocd_namespace }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "{{ '2' if app.name == 'retail-store-ui' else '1' }}"
+spec:
+  project: retail-store
+  source:
+    repoURL: {{ git_repo_url }}
+    targetRevision: {{ app.revision }}
+    path: {{ app.path }}
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-onprem.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: retail-store
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

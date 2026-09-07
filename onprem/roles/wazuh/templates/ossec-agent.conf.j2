@@ -1,0 +1,137 @@
+<ossec_config>
+
+  <!-- ===================================================================
+       Client — connect agent to Wazuh Manager
+       Requirements: 8.3
+       =================================================================== -->
+  <client>
+    <server>
+      <address>{{ wazuh_manager_ip }}</address>
+      <port>1514</port>
+      <protocol>tcp</protocol>
+    </server>
+    <config-profile>ubuntu, ubuntu20</config-profile>
+    <notify_time>10</notify_time>
+    <time-reconnect>60</time-reconnect>
+    <auto_restart>yes</auto_restart>
+    <crypto_method>aes</crypto_method>
+  </client>
+
+  <!-- ===================================================================
+       Client buffer
+       =================================================================== -->
+  <client_buffer>
+    <disabled>no</disabled>
+    <queue_size>5000</queue_size>
+    <events_per_second>500</events_per_second>
+  </client_buffer>
+
+  <!-- ===================================================================
+       Agent enrollment (authd auto-registration)
+       Requirements: 8.3
+       =================================================================== -->
+  <enrollment>
+    <enabled>yes</enabled>
+    <manager_address>{{ wazuh_manager_ip }}</manager_address>
+    <port>1515</port>
+    <agent_name>{{ inventory_hostname }}</agent_name>
+    <authorization_pass_path>/var/ossec/etc/authd.pass</authorization_pass_path>
+  </enrollment>
+
+  <!-- ===================================================================
+       File Integrity Monitoring
+       Requirements: 8.4
+       =================================================================== -->
+  <syscheck>
+    <disabled>no</disabled>
+    <frequency>43200</frequency>
+    <scan_on_start>yes</scan_on_start>
+
+    <!-- Monitor critical system directories -->
+    <directories check_all="yes" report_changes="yes" realtime="yes">/etc</directories>
+    <directories check_all="yes">/usr/bin</directories>
+    <directories check_all="yes">/usr/sbin</directories>
+
+    <!-- Ignore noisy paths -->
+    <ignore>/etc/mtab</ignore>
+    <ignore>/etc/hosts.deny</ignore>
+    <ignore>/etc/adjtime</ignore>
+    <ignore>/etc/random-seed</ignore>
+
+    <skip_nfs>yes</skip_nfs>
+    <skip_dev>yes</skip_dev>
+    <skip_proc>yes</skip_proc>
+    <skip_sys>yes</skip_sys>
+  </syscheck>
+
+  <!-- ===================================================================
+       Rootcheck
+       =================================================================== -->
+  <rootcheck>
+    <disabled>no</disabled>
+    <check_files>yes</check_files>
+    <check_trojans>yes</check_trojans>
+    <check_dev>yes</check_dev>
+    <check_sys>yes</check_sys>
+    <check_pids>yes</check_pids>
+    <check_ports>yes</check_ports>
+    <check_if>yes</check_if>
+    <frequency>43200</frequency>
+    <skip_nfs>yes</skip_nfs>
+  </rootcheck>
+
+  <!-- ===================================================================
+       Log collection
+       Requirements: 8.4, 8.7
+       =================================================================== -->
+
+  <!-- System syslog -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/syslog</location>
+  </localfile>
+
+  <!-- Authentication log -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/auth.log</location>
+  </localfile>
+
+  <!-- Kernel messages -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/kern.log</location>
+  </localfile>
+
+  <!-- Container logs (Docker / containerd stdout/stderr via kubelet)
+       Requirements: 8.7 -->
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/log/containers/*.log</location>
+    <label key="event.module">kubernetes</label>
+  </localfile>
+
+  <!-- Kubernetes API server audit log (master node only)
+       Requirements: 8.6 -->
+{% if inventory_hostname in groups['master'] %}
+  <localfile>
+    <log_format>json</log_format>
+    <location>/var/log/kube-apiserver-audit.log</location>
+    <label key="event.module">kubernetes-audit</label>
+  </localfile>
+{% endif %}
+
+  <!-- Docker daemon log -->
+  <localfile>
+    <log_format>syslog</log_format>
+    <location>/var/log/daemon.log</location>
+  </localfile>
+
+  <!-- ===================================================================
+       Active Response — disabled by default
+       =================================================================== -->
+  <active-response>
+    <disabled>yes</disabled>
+  </active-response>
+
+</ossec_config>

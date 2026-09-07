@@ -1,0 +1,12 @@
+---
+# =============================================================================
+# local-registry/handlers/main.yml
+# Handlers triggered when containerd configuration changes.
+# =============================================================================
+
+- name: Restart containerd
+  ansible.builtin.systemd:
+    name: containerd
+    state: restarted
+    daemon_reload: true
+  when: inventory_hostname in (groups['master'] + groups['workers'] | default([]))

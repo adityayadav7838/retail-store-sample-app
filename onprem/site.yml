@@ -1,0 +1,32 @@
+---
+# Master playbook — Retail Store On-Premises Full Stack Deployment
+# Usage: ansible-playbook -i inventory/hosts.ini site.yml
+- name: Run pre-flight checks
+  ansible.builtin.import_playbook: roles/preflight/playbook.yml
+
+- name: Provision Kubernetes cluster
+  ansible.builtin.import_playbook: roles/k8s-cluster/playbook.yml
+
+- name: Deploy local container registry
+  ansible.builtin.import_playbook: roles/local-registry/playbook.yml
+
+- name: Install MetalLB load balancer
+  ansible.builtin.import_playbook: roles/metallb/playbook.yml
+
+- name: Install NGINX Ingress Controller
+  ansible.builtin.import_playbook: roles/nginx-ingress/playbook.yml
+
+- name: Install and configure ArgoCD
+  ansible.builtin.import_playbook: roles/argocd/playbook.yml
+
+- name: Build and push service images to local registry
+  ansible.builtin.import_playbook: roles/build-push-images/playbook.yml
+
+- name: Generate on-premises Helm value overrides
+  ansible.builtin.import_playbook: roles/helm-values/playbook.yml
+
+- name: Deploy Wazuh SIEM stack and agents
+  ansible.builtin.import_playbook: roles/wazuh/playbook.yml
+
+- name: Run post-deployment smoke tests
+  ansible.builtin.import_playbook: roles/verify/playbook.yml

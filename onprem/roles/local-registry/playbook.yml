@@ -1,0 +1,13 @@
+---
+# Entry-point playbook for the local-registry role.
+# Imported by onprem/site.yml after the k8s-cluster role.
+#
+# Hosts breakdown:
+#   registry  — runs the Docker Registry v2 container
+#   master    — gets containerd configured to use the insecure registry
+#   workers   — get containerd configured to use the insecure registry
+- name: Deploy local container registry and configure Kubernetes nodes
+  hosts: registry:master:workers
+  gather_facts: true
+  roles:
+    - role: local-registry

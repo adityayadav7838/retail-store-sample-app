@@ -1,0 +1,147 @@
+---
+# =============================================================================
+# wazuh/tasks/audit.yml
+# Configures Kubernetes API server audit logging on master node(s).
+# Handles both kubeadm (static pod manifest) and k3s (config file) setups.
+# Requirements: 8.6
+# =============================================================================
+
+- name: Deploy Kubernetes audit policy to master node(s)
+  ansible.builtin.template:
+    src: audit-policy.yaml.j2
+    dest: /etc/kubernetes/audit-policy.yaml
+    owner: root
+    group: root
+    mode: "0600"
+  become: true
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['master'] }}"
+
+# ---------------------------------------------------------------------------
+# kubeadm: patch kube-apiserver static pod manifest
+# ---------------------------------------------------------------------------
+- name: Check if kubeadm kube-apiserver manifest exists
+  ansible.builtin.stat:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  register: _kubeadm_manifest
+
+- name: Read existing kube-apiserver manifest (kubeadm)
+  ansible.builtin.slurp:
+    src: /etc/kubernetes/manifests/kube-apiserver.yaml
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  register: _kube_apiserver_manifest
+  when: _kubeadm_manifest.stat.exists
+
+- name: Patch kube-apiserver manifest to enable audit logging (kubeadm)
+  ansible.builtin.copy:
+    content: "{{ _kube_apiserver_manifest.content | b64decode | regex_replace('(command:\\n(?:.*\\n)*?)(    - kube-apiserver)', '\\1\\2\\n    - --audit-log-path=/var/log/kube-apiserver-audit.log\\n    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml\\n    - --audit-log-maxage=30\\n    - --audit-log-maxbackup=10\\n    - --audit-log-maxsize=100') }}"
+    dest: /etc/kubernetes/manifests/kube-apiserver.yaml
+    owner: root
+    group: root
+    mode: "0600"
+    backup: true
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when:
+    - _kubeadm_manifest.stat.exists
+    - "'audit-log-path' not in (_kube_apiserver_manifest.content | b64decode)"
+
+- name: Ensure audit log hostPath volume is configured in kube-apiserver manifest
+  ansible.builtin.blockinfile:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    marker: "# {mark} ANSIBLE MANAGED — audit log volume"
+    insertafter: "  volumes:"
+    block: |
+      - hostPath:
+          path: /var/log
+          type: DirectoryOrCreate
+        name: audit-log
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when:
+    - _kubeadm_manifest.stat.exists
+    - "'audit-log' not in (_kube_apiserver_manifest.content | b64decode)"
+
+- name: Ensure audit policy hostPath volume is configured in kube-apiserver manifest
+  ansible.builtin.blockinfile:
+    path: /etc/kubernetes/manifests/kube-apiserver.yaml
+    marker: "# {mark} ANSIBLE MANAGED — audit policy volume"
+    insertafter: "# END ANSIBLE MANAGED — audit log volume"
+    block: |
+      - hostPath:
+          path: /etc/kubernetes
+          type: DirectoryOrCreate
+        name: audit-policy
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when:
+    - _kubeadm_manifest.stat.exists
+    - "'audit-policy' not in (_kube_apiserver_manifest.content | b64decode)"
+
+# ---------------------------------------------------------------------------
+# k3s: configure audit logging via k3s config file
+# ---------------------------------------------------------------------------
+- name: Check if k3s config directory exists
+  ansible.builtin.stat:
+    path: /etc/rancher/k3s
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  register: _k3s_config_dir
+
+- name: Ensure k3s config directory exists
+  ansible.builtin.file:
+    path: /etc/rancher/k3s
+    state: directory
+    owner: root
+    group: root
+    mode: "0750"
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when: _k3s_config_dir.stat.exists or cluster_type == 'k3s'
+
+- name: Configure k3s kube-apiserver audit logging
+  ansible.builtin.blockinfile:
+    path: /etc/rancher/k3s/config.yaml
+    create: true
+    owner: root
+    group: root
+    mode: "0640"
+    marker: "# {mark} ANSIBLE MANAGED — audit logging"
+    block: |
+      kube-apiserver-arg:
+        - "audit-log-path=/var/log/kube-apiserver-audit.log"
+        - "audit-policy-file=/etc/kubernetes/audit-policy.yaml"
+        - "audit-log-maxage=30"
+        - "audit-log-maxbackup=10"
+        - "audit-log-maxsize=100"
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when: cluster_type == 'k3s'
+  notify: Restart k3s
+
+- name: Restart k3s to apply audit config
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  when:
+    - cluster_type == 'k3s'
+    - _k3s_config_dir.stat.exists
+
+# ---------------------------------------------------------------------------
+# Ensure audit log file exists and is readable by Wazuh agent
+# ---------------------------------------------------------------------------
+- name: Ensure audit log file exists and is world-readable
+  ansible.builtin.file:
+    path: /var/log/kube-apiserver-audit.log
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  delegate_to: "{{ groups['master'][0] }}"
+  changed_when: false
