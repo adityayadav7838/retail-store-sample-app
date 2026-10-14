@@ -71,8 +71,8 @@ module "retail_app_eks" {
 
 
 # Network configuration
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+      = module.vpc.vpc_id
+   = module.vpc.private_subnets
 
   # KMS configuration to avoid conflicts
   create_kms_key = true
