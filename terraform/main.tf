@@ -18,7 +18,7 @@ module "" {
   private_subnets = local.private_subnets
 
   # NAT Gateway configuration
-  enable_nat_gateway = true
+  #enable_nat_gateway = true
   single_nat_gateway = var.enable_single_nat_gateway
 
   # Internet Gateway
