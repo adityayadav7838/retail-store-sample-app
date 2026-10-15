@@ -1,6 +1,6 @@
 # ARGOCD INSTALLATION AND CONFIGURATION
 
-resource "time_sleep" "wait_for_cluster" {
+resource "time_eep" "wait" {
   create_duration = "45s"
   depends_on = [
     module.retail_app_eks,
