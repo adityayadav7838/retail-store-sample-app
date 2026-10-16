@@ -12,11 +12,11 @@ terraform {
     }
     helm = {
       source  = "hashicorp/helm"
-      version = ">= 2.0"
+      version = ">= 1.0"
     }
     kubectl = {
       source  = "gavinbunney/kubectl"
-      version = ">= 1.14"
+      version = ">= 0.14"
     }
     time = {
       source  = "hashicorp/time"
